@@ -10,13 +10,41 @@ Implements Section 4 UX:
 Designed for arcade joysticks and d-pads (UP, DOWN, ENTER/BTN1, ESC/BTN2).
 """
 
+import os
 import sys
 import time
 import logging
+import subprocess
 from typing import List, Optional, Callable, Dict, Any
 from .connection_manager import ConnectionProgressStep
 
 logger = logging.getLogger("Arcade.UI")
+
+
+def blank_system_framebuffer() -> None:
+    """Clear framebuffer and hide terminal cursor on Linux / EmuELEC."""
+    try:
+        sys.stdout.write("\033[2J\033[H\033[?25l")
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+    if sys.platform.startswith("linux"):
+        import shutil
+        if shutil.which("emuelec-utils"):
+            try:
+                subprocess.run(["emuelec-utils", "blank_buffer"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.0)
+            except Exception:
+                pass
+        for dev in ("/dev/tty0", "/dev/tty1", "/dev/console"):
+            if os.path.exists(dev) and os.access(dev, os.W_OK):
+                try:
+                    subprocess.run(["reset"],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.0)
+                    break
+                except Exception:
+                    pass
 
 
 class ArcadeTUI:
@@ -25,16 +53,21 @@ class ArcadeTUI:
     def __init__(self):
         self.stdscr = None
         self.curses_available = False
+        self.curses = None
 
     def init_curses(self) -> bool:
         """Initialize curses display."""
+        blank_system_framebuffer()
         try:
             import curses
             self.curses = curses
             self.stdscr = curses.initscr()
             curses.noecho()
             curses.cbreak()
-            curses.curs_set(0)
+            try:
+                curses.curs_set(0)
+            except Exception:
+                pass
             self.stdscr.keypad(True)
             self.stdscr.timeout(500)  # 500ms poll timeout
 
@@ -56,21 +89,29 @@ class ArcadeTUI:
             return False
 
     def restore_terminal(self) -> None:
-        """Restore normal terminal settings."""
+        """Restore normal terminal settings and blank framebuffer for game display."""
         if self.curses_available and self.stdscr:
             try:
-                self.curses.nocbreak()
+                self.stdscr.clear()
+                self.stdscr.refresh()
+            except Exception:
+                pass
+            try:
+                import curses
+                curses.nocbreak()
                 self.stdscr.keypad(False)
-                self.curses.echo()
-                self.curses.curs_set(1)
-                self.curses.endwin()
+                curses.echo()
+                try:
+                    curses.curs_set(0)
+                except Exception:
+                    pass
+                curses.endwin()
                 logger.debug("Terminal curses direstore ke mode standar.")
             except Exception:
                 pass
-                self.curses.endwin()
-            except Exception:
-                pass
             self.curses_available = False
+
+        blank_system_framebuffer()
 
     def draw_box(self, title: str, lines: List[str], footer: str = "") -> None:
         """Draw a retro arcade bordered window."""
