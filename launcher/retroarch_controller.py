@@ -197,20 +197,22 @@ class RetroArchController:
                 error_message=None
             )
 
-        # Blank OSD plane and silence terminal echoing on Linux / EmuELEC
+        # Silence terminal echoing, hide cursor, and clear screen on Linux / EmuELEC
         is_linux = sys.platform.startswith("linux")
-        fb_blank_path = "/sys/class/graphics/fb0/blank"
         if is_linux:
             try:
                 subprocess.run(["stty", "-echo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
             except Exception:
                 pass
-            if os.path.exists(fb_blank_path):
-                try:
-                    with open(fb_blank_path, "w") as f:
-                        f.write("1\n")
-                except Exception:
-                    pass
+            try:
+                subprocess.run(["setterm", "-cursor", "off"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
+            except Exception:
+                pass
+            try:
+                sys.stdout.write("\033[2J\033[H\033[?25l")
+                sys.stdout.flush()
+            except Exception:
+                pass
 
         try:
             self.active_process = subprocess.Popen(
@@ -290,14 +292,17 @@ class RetroArchController:
         finally:
             self.active_process = None
             if is_linux:
-                if os.path.exists(fb_blank_path):
-                    try:
-                        with open(fb_blank_path, "w") as f:
-                            f.write("0\n")
-                    except Exception:
-                        pass
                 try:
                     subprocess.run(["stty", "echo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
+                except Exception:
+                    pass
+                try:
+                    subprocess.run(["setterm", "-cursor", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
+                except Exception:
+                    pass
+                try:
+                    sys.stdout.write("\033[?25h")
+                    sys.stdout.flush()
                 except Exception:
                     pass
             self.cleanup()
