@@ -197,7 +197,7 @@ class RetroArchController:
                 error_message=None
             )
 
-        # Silence terminal echoing, reset framebuffer offset, and clear screen on Linux / EmuELEC
+        # Silence terminal echoing, freeze background terminal (fbterm/gptokeyb), reset framebuffer offset, and clear screen on Linux / EmuELEC
         is_linux = sys.platform.startswith("linux")
         if is_linux:
             try:
@@ -213,8 +213,15 @@ class RetroArchController:
             except Exception:
                 pass
             try:
-                sys.stdout.write("\033[2J\033[H\033[?25l")
+                # Clear screen, scrollback buffer, and hide cursor
+                sys.stdout.write("\033[H\033[2J\033[3J\033[?25l")
                 sys.stdout.flush()
+            except Exception:
+                pass
+            try:
+                # Freeze fbterm & gptokeyb on EmuELEC so the terminal is completely hidden
+                # and gamepad presses are not translated into console keystrokes during gameplay
+                subprocess.run(["killall", "-STOP", "fbterm", "gptokeyb"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
             except Exception:
                 pass
 
@@ -296,6 +303,11 @@ class RetroArchController:
         finally:
             self.active_process = None
             if is_linux:
+                try:
+                    # Unfreeze fbterm & gptokeyb on EmuELEC
+                    subprocess.run(["killall", "-CONT", "fbterm", "gptokeyb"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
+                except Exception:
+                    pass
                 try:
                     subprocess.run(["fbfix", "0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
                 except Exception:
