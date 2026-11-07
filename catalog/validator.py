@@ -129,6 +129,8 @@ def find_core_library(core_name: str, core_aliases: Optional[List[str]] = None,
     system = platform.system()
     if system == "Linux":
         search_dirs.extend([
+            "/tmp/cores",                      # EmuELEC active cores mount
+            "/storage/.config/retroarch/cores",# EmuELEC config cores
             "/usr/lib/libretro",
             "/usr/lib/x86_64-linux-gnu/libretro",
             "/usr/lib/aarch64-linux-gnu/libretro",

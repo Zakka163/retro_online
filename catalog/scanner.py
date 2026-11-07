@@ -161,6 +161,8 @@ class SystemScanner:
         system = platform.system()
         if system == "Linux":
             dirs.extend([
+                "/tmp/cores",                                   # EmuELEC active cores mount
+                "/storage/.config/retroarch/cores",             # EmuELEC config cores
                 "/usr/lib/libretro",
                 "/usr/lib/x86_64-linux-gnu/libretro",
                 "/usr/lib/aarch64-linux-gnu/libretro",
@@ -265,6 +267,8 @@ class SystemScanner:
                 "/storage/roms/mame",                           # EmuELEC
                 "/storage/roms/fbneo",
                 "/storage/roms/arcade",
+                "/storage/roms/snes",
+                "/storage/roms",
                 "/home/pi/RetroPie/roms/arcade",               # RetroPie
                 "/home/pi/RetroPie/roms/mame-libretro",
                 "/home/pi/RetroPie/roms/fba",
