@@ -71,10 +71,10 @@ online_netplay/
 
 - **Pengguna Windows**:
   Cukup klik dua kali file **`Mainkan_Arcade.bat`** (skrip akan otomatis mendeteksi Python, memasang `windows-curses` jika diperlukan, dan membuka antarmuka game).
-- **Pengguna macOS & Linux**:
+- **Pengguna macOS & Linux / EmuELEC**:
   Jalankan di terminal:
   ```bash
-  ./Mainkan_Arcade.sh
+  python3 -m launcher.main --server "http://217.216.146.15:8080"
   ```
 
 ### 2. Menjalankan TUI Interaktif secara Manual
