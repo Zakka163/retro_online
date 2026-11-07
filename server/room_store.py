@@ -58,6 +58,16 @@ class RoomStore:
             if room.is_expired:
                 del self._rooms[room_id]
                 return None
+
+            # Detect dead heartbeat if in active 2-player match
+            now = time.time()
+            if room.client is not None:
+                if (now - room.host.last_heartbeat) > 12.0:
+                    room.status = "closed"
+                elif (now - room.client.last_heartbeat) > 12.0:
+                    room.client = None
+                    room.status = "waiting"
+
             return room
 
     def list_rooms(self, game_id: Optional[str] = None,

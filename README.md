@@ -67,7 +67,17 @@ online_netplay/
 
 ## 🕹️ Panduan Penggunaan Launcher
 
-### 1. Menjalankan TUI Interaktif (Mode Arcade Cabinet)
+### 1. Cara Cepat Satu Klik (One-Click Runner)
+
+- **Pengguna Windows**:
+  Cukup klik dua kali file **`Mainkan_Arcade.bat`** (skrip akan otomatis mendeteksi Python, memasang `windows-curses` jika diperlukan, dan membuka antarmuka game).
+- **Pengguna macOS & Linux**:
+  Jalankan di terminal:
+  ```bash
+  ./Mainkan_Arcade.sh
+  ```
+
+### 2. Menjalankan TUI Interaktif secara Manual
 
 ```bash
 python3 -m launcher.main

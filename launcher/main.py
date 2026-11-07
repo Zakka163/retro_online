@@ -22,6 +22,7 @@ from .client_api import ArcadeClientAPI
 from .connection_manager import ConnectionManager, ConnectionProgressStep, ERROR_MESSAGES
 from .ui import ArcadeTUI, ArcadeCLI
 from .logger import setup_launcher_logging, get_recent_logs
+from .session_supervisor import SessionSupervisor
 
 logger = logging.getLogger("Arcade.Launcher")
 
@@ -185,8 +186,31 @@ class ArcadeLauncherApp:
                 fullscreen=self.fullscreen
             )
 
-            res = self.ra_controller.launch(launch_cfg, dry_run=self.dry_run)
-            if res.status in ("FAILED", "CRASHED"):
+            supervisor = SessionSupervisor(
+                api=self.api,
+                room_id=room_id,
+                player_id=host_id,
+                token=host_token,
+                role="host",
+                ra_controller=self.ra_controller,
+                local_bridge=result.local_bridge
+            )
+            supervisor.start()
+
+            try:
+                res = self.ra_controller.launch(launch_cfg, dry_run=self.dry_run)
+            finally:
+                supervisor.stop()
+                if result.local_bridge:
+                    result.local_bridge.stop()
+                try:
+                    self.api.send_signal(room_id, host_id, "peer.left", {"reason": f"{self.player_name} keluar dari game"})
+                except Exception:
+                    pass
+
+            if supervisor.peer_disconnected:
+                print(f"\n[!] Lawan terputus: {supervisor.disconnect_reason}\nPermainan diakhiri.")
+            elif res.status in ("FAILED", "CRASHED"):
                 print(f"\n[!] Gagal menjalankan game: {res.error_message}")
             print(f"Sesi permainan selesai. Status: {res.status} (Durasi: {res.duration_seconds:.1f}s)")
 
@@ -260,15 +284,34 @@ class ArcadeLauncherApp:
             fullscreen=self.fullscreen
         )
 
+        supervisor = SessionSupervisor(
+            api=self.api,
+            room_id=room_id,
+            player_id=client_id,
+            token=client_token,
+            role="client",
+            ra_controller=self.ra_controller,
+            local_bridge=result.local_bridge
+        )
+        supervisor.start()
+
         try:
             res = self.ra_controller.launch(launch_cfg, dry_run=self.dry_run)
-            if res.status in ("FAILED", "CRASHED"):
-                print(f"\n[!] Gagal menjalankan game: {res.error_message}")
-            print(f"Permainan selesai. Status: {res.status}")
         finally:
+            supervisor.stop()
             if result.local_bridge:
                 result.local_bridge.stop()
+            try:
+                self.api.send_signal(room_id, client_id, "peer.left", {"reason": f"{self.player_name} keluar dari game"})
+            except Exception:
+                pass
             self.api.leave_room(room_id, client_id, client_token)
+
+        if supervisor.peer_disconnected:
+            print(f"\n[!] Lawan terputus: {supervisor.disconnect_reason}\nPermainan diakhiri.")
+        elif res.status in ("FAILED", "CRASHED"):
+            print(f"\n[!] Gagal menjalankan game: {res.error_message}")
+        print(f"Permainan selesai. Status: {res.status}")
 
     def run_interactive(self) -> None:
         """Run the interactive Arcade Curses frontend, or interactive CLI on platforms without curses."""
@@ -609,9 +652,34 @@ class ArcadeLauncherApp:
                 retroarch_bin=ra_bin,
                 fullscreen=self.fullscreen
             )
-            res = self.ra_controller.launch(launch_cfg, dry_run=self.dry_run)
+            supervisor = SessionSupervisor(
+                api=self.api,
+                room_id=room_id,
+                player_id=host_id,
+                token=host_token,
+                role="host",
+                ra_controller=self.ra_controller,
+                local_bridge=result.local_bridge
+            )
+            supervisor.start()
+
+            try:
+                res = self.ra_controller.launch(launch_cfg, dry_run=self.dry_run)
+            finally:
+                supervisor.stop()
+                if result.local_bridge:
+                    result.local_bridge.stop()
+                try:
+                    self.api.send_signal(room_id, host_id, "peer.left", {"reason": f"{self.player_name} keluar dari game"})
+                except Exception:
+                    pass
+
             self.ui.init_curses()
-            if res.status == "MOCK_SUCCESS":
+            if supervisor.peer_disconnected:
+                msg = supervisor.disconnect_reason or "Lawan terputus dari permainan."
+                logger.warning(f"Sesi netplay diakhiri: {msg}")
+                self.ui.show_message("LAWAN TERPUTUS", f"{msg}\nPermainan diakhiri.", wait_seconds=3.0)
+            elif res.status == "MOCK_SUCCESS":
                 self.ui.show_message("SIMULASI BERHASIL", "Mode --dry-run aktif! Koneksi disimulasikan tanpa membuka game fisik.", wait_seconds=2.5)
             elif res.exit_code != 0 or res.status in ("FAILED", "CRASHED"):
                 err_text = res.error_message or f"Kode keluar: {res.exit_code}"
@@ -685,19 +753,39 @@ class ArcadeLauncherApp:
             retroarch_bin=ra_bin
         )
 
+        supervisor = SessionSupervisor(
+            api=self.api,
+            room_id=room["room_id"],
+            player_id=client_id,
+            token=client_token,
+            role="client",
+            ra_controller=self.ra_controller,
+            local_bridge=result.local_bridge
+        )
+        supervisor.start()
+
         try:
             res = self.ra_controller.launch(launch_cfg, dry_run=self.dry_run)
-            self.ui.init_curses()
-            if res.status == "MOCK_SUCCESS":
-                self.ui.show_message("SIMULASI BERHASIL", "Mode --dry-run aktif! Koneksi disimulasikan tanpa membuka game fisik.", wait_seconds=2.5)
-            elif res.exit_code != 0 or res.status in ("FAILED", "CRASHED"):
-                err_text = res.error_message or f"Kode keluar: {res.exit_code}"
-                self.ui.show_message("RETROARCH GAGAL DIBUKA", f"Gagal menjalankan game:\n{err_text[:250]}", wait_seconds=4.0)
         finally:
+            supervisor.stop()
             if result.local_bridge:
                 result.local_bridge.stop()
+            try:
+                self.api.send_signal(room["room_id"], client_id, "peer.left", {"reason": f"{self.player_name} keluar dari game"})
+            except Exception:
+                pass
             self.api.leave_room(room["room_id"], client_id, client_token)
             self.ui.init_curses()
+
+        if supervisor.peer_disconnected:
+            msg = supervisor.disconnect_reason or "Lawan terputus dari permainan."
+            logger.warning(f"Sesi netplay diakhiri: {msg}")
+            self.ui.show_message("LAWAN TERPUTUS", f"{msg}\nPermainan diakhiri.", wait_seconds=3.0)
+        elif res.status == "MOCK_SUCCESS":
+            self.ui.show_message("SIMULASI BERHASIL", "Mode --dry-run aktif! Koneksi disimulasikan tanpa membuka game fisik.", wait_seconds=2.5)
+        elif res.exit_code != 0 or res.status in ("FAILED", "CRASHED"):
+            err_text = res.error_message or f"Kode keluar: {res.exit_code}"
+            self.ui.show_message("RETROARCH GAGAL DIBUKA", f"Gagal menjalankan game:\n{err_text[:250]}", wait_seconds=4.0)
 
 
 def main() -> None:

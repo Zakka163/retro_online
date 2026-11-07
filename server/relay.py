@@ -256,6 +256,7 @@ class LocalRelayBridge:
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
+        self.disconnect_event = threading.Event()
 
     def start(self) -> None:
         self._running = True
@@ -340,16 +341,21 @@ class LocalRelayBridge:
                     try:
                         data = s.recv(65536)
                         if not data:
+                            self.disconnect_event.set()
                             return
                         other.sendall(data)
                     except (BlockingIOError, InterruptedError):
                         continue
                     except Exception:
+                        self.disconnect_event.set()
                         return
 
         except Exception as e:
             logger.debug(f"LocalRelayBridge exception: {e}")
+            self.disconnect_event.set()
         finally:
+            if not self._stop_event.is_set():
+                self.disconnect_event.set()
             try:
                 relay_sock.close()
             except Exception:

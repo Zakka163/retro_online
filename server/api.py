@@ -345,7 +345,6 @@ class ArcadeAPIHandler(BaseHTTPRequestHandler):
                     event="room.closed",
                     payload={"room_id": room_id}
                 )
-                self.signaling.clear_room(room_id)
                 self._send_json(HTTPStatus.OK, {"ok": True, "message": "Room closed"})
             else:
                 self._send_error(HTTPStatus.FORBIDDEN, "FORBIDDEN", "Invalid host token or room already closed")

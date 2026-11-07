@@ -21,7 +21,8 @@ class ArcadeClientAPI:
 
     def _request(self, method: str, path: str,
                  body: Optional[Dict[str, Any]] = None,
-                 headers: Optional[Dict[str, str]] = None) -> Tuple[int, Dict[str, Any]]:
+                 headers: Optional[Dict[str, str]] = None,
+                 timeout: Optional[float] = None) -> Tuple[int, Dict[str, Any]]:
         """Perform an HTTP request and parse JSON output."""
         url = f"{self.server_url}{path}"
         req_headers = {"User-Agent": "ArcadeOnlineLauncher/1.0"}
@@ -36,8 +37,9 @@ class ArcadeClientAPI:
         req = urllib.request.Request(url, data=data, headers=req_headers, method=method)
 
         t0 = time.time()
+        req_timeout = timeout if timeout is not None else self.timeout
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with urllib.request.urlopen(req, timeout=req_timeout) as resp:
                 elapsed = (time.time() - t0) * 1000.0
                 status_code = resp.status
                 resp_body = resp.read().decode("utf-8")
@@ -91,9 +93,9 @@ class ArcadeClientAPI:
             return rooms
         return []
 
-    def get_room(self, room_id: str) -> Optional[Dict[str, Any]]:
+    def get_room(self, room_id: str, timeout: Optional[float] = None) -> Optional[Dict[str, Any]]:
         """Fetch details of a specific room."""
-        status, data = self._request("GET", f"/api/rooms/{room_id}")
+        status, data = self._request("GET", f"/api/rooms/{room_id}", timeout=timeout)
         if status == 200:
             return data.get("room")
         logger.warning(f"Room {room_id} tidak ditemukan pada server.")
@@ -151,10 +153,11 @@ class ArcadeClientAPI:
         status, _ = self._request("DELETE", f"/api/rooms/{room_id}", headers=headers)
         return status == 200
 
-    def send_heartbeat(self, room_id: str, player_id: str, token: str) -> bool:
+    def send_heartbeat(self, room_id: str, player_id: str, token: str,
+                       timeout: Optional[float] = None) -> bool:
         """Keep room and session alive."""
         payload = {"player_id": player_id, "token": token}
-        status, _ = self._request("POST", f"/api/rooms/{room_id}/heartbeat", body=payload)
+        status, _ = self._request("POST", f"/api/rooms/{room_id}/heartbeat", body=payload, timeout=timeout)
         return status == 200
 
     def send_signal(self, room_id: str, sender_id: str, event: str,
@@ -172,10 +175,11 @@ class ArcadeClientAPI:
         return status == 200
 
     def poll_signals(self, room_id: str, player_id: str,
-                     since: float = 0.0, timeout: float = 4.0) -> List[Dict[str, Any]]:
+                     since: float = 0.0, timeout: float = 4.0,
+                     req_timeout: Optional[float] = None) -> List[Dict[str, Any]]:
         """Poll incoming signaling messages."""
         path = f"/api/rooms/{room_id}/poll?player_id={player_id}&since={since}&timeout={timeout}"
-        status, data = self._request("GET", path)
+        status, data = self._request("GET", path, timeout=req_timeout or (timeout + 2.0))
         if status == 200:
             msgs = data.get("messages", [])
             if msgs:
