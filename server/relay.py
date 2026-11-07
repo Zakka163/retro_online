@@ -193,41 +193,51 @@ class RelayServer:
             return
 
         try:
-            # Enable TCP_NODELAY for lowest latency arcade experience on TCP sockets
+            # Configure sockets for reliable, low-latency streaming
             for s in (h_sock, c_sock):
-                if s.family in (socket.AF_INET, getattr(socket, "AF_INET6", -1)):
-                    try:
-                        s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                    except OSError:
-                        pass
-                s.setblocking(False)
+                try:
+                    s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 262144)
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
+                except OSError:
+                    pass
+                s.settimeout(15.0)
                 s.sendall(b"OK CONNECTED\n")
 
             sockets = [h_sock, c_sock]
 
             while self._running and not session._close_event.is_set():
-                rlist, _, xlist = select.select(sockets, [], sockets, 1.0)
-                if xlist:
+                try:
+                    rlist, _, _ = select.select(sockets, [], [], 1.0)
+                except (ValueError, OSError):
                     break
 
                 for s in rlist:
+                    other = c_sock if s is h_sock else h_sock
+                    s_role = "HOST" if s is h_sock else "CLIENT"
                     try:
                         data = s.recv(65536)
                         if not data:
+                            logger.info(f"[RelayServer] {s_role} menutup koneksi relay (EOF) untuk room {session.room_id}")
                             session.close()
                             return
 
                         session.last_activity = time.time()
+                        other.sendall(data)
 
                         if s is h_sock:
-                            c_sock.sendall(data)
                             session.bytes_host_to_client += len(data)
                         else:
-                            h_sock.sendall(data)
                             session.bytes_client_to_host += len(data)
-                    except (BlockingIOError, InterruptedError):
+                    except (socket.timeout, BlockingIOError, InterruptedError):
                         continue
-                    except Exception:
+                    except (ConnectionResetError, BrokenPipeError):
+                        logger.info(f"[RelayServer] {s_role} connection reset untuk room {session.room_id}")
+                        session.close()
+                        return
+                    except Exception as e:
+                        logger.warning(f"[RelayServer] Relay error: {e}")
                         session.close()
                         return
 
@@ -328,25 +338,42 @@ class LocalRelayBridge:
             local_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
             # 3. Bidirectional pipe between relay_sock and local_sock
+            for s in (relay_sock, local_sock):
+                try:
+                    s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 262144)
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
+                except OSError:
+                    pass
+                s.settimeout(15.0)
+
             sockets = [relay_sock, local_sock]
-            relay_sock.setblocking(False)
-            local_sock.setblocking(False)
 
             while self._running and not self._stop_event.is_set():
-                rlist, _, xlist = select.select(sockets, [], sockets, 0.5)
-                if xlist:
+                try:
+                    rlist, _, _ = select.select(sockets, [], [], 0.5)
+                except (ValueError, OSError):
                     break
+
                 for s in rlist:
                     other = local_sock if s is relay_sock else relay_sock
+                    s_name = "RetroArch Lokal" if s is local_sock else "Relay VPS"
                     try:
                         data = s.recv(65536)
                         if not data:
+                            logger.info(f"[LocalRelayBridge] Koneksi {s_name} ditutup (EOF).")
                             self.disconnect_event.set()
                             return
                         other.sendall(data)
-                    except (BlockingIOError, InterruptedError):
+                    except (socket.timeout, BlockingIOError, InterruptedError):
                         continue
-                    except Exception:
+                    except (ConnectionResetError, BrokenPipeError) as e:
+                        logger.info(f"[LocalRelayBridge] Koneksi {s_name} terputus: {e}")
+                        self.disconnect_event.set()
+                        return
+                    except Exception as e:
+                        logger.warning(f"[LocalRelayBridge] Error pada {s_name}: {e}")
                         self.disconnect_event.set()
                         return
 
