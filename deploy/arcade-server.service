@@ -1,0 +1,17 @@
+[Unit]
+Description=Arcade Online Matchmaking, Signaling, and Netplay Relay Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/arcade_online
+ExecStart=/usr/bin/python3 -m server.app --host 0.0.0.0 --port 8080 --relay-port 55436 --public-relay-host %H
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+

@@ -1,0 +1,22 @@
+{
+  "version": "1.0",
+  "server": {
+    "url": "http://217.216.146.15:8080",
+    "timeout_seconds": 8.0,
+    "heartbeat_interval_seconds": 15.0
+  },
+  "client": {
+    "player_name": "ArcadeCab1",
+    "direct_connection_timeout": 3.0,
+    "overall_connection_timeout": 20.0
+  },
+  "retroarch": {
+    "binary_path": null,
+    "custom_cores_dir": null,
+    "custom_roms_dir": null,
+    "fullscreen": true,
+    "check_frames": 30,
+    "input_latency_frames": 0
+  }
+}
+

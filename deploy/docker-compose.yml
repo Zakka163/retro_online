@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  arcade-server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: arcade_online_server
+    restart: unless-stopped
+    ports:
+      - "8080:8080"      # Matchmaking REST API & Signaling
+      - "55436:55436"    # High-Performance TCP Netplay Relay
+    environment:
+      - PYTHONUNBUFFERED=1
+    command:
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8080"
+      - "--relay-port"
+      - "55436"
+      - "--public-relay-host"
+      - "${PUBLIC_IP:-127.0.0.1}"
+
