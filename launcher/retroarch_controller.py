@@ -197,9 +197,13 @@ class RetroArchController:
                 error_message=None
             )
 
-        # Silence terminal echoing, hide cursor, and clear screen on Linux / EmuELEC
+        # Silence terminal echoing, reset framebuffer offset, and clear screen on Linux / EmuELEC
         is_linux = sys.platform.startswith("linux")
         if is_linux:
+            try:
+                subprocess.run(["fbfix", "0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
+            except Exception:
+                pass
             try:
                 subprocess.run(["stty", "-echo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
             except Exception:
@@ -292,6 +296,10 @@ class RetroArchController:
         finally:
             self.active_process = None
             if is_linux:
+                try:
+                    subprocess.run(["fbfix", "0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
+                except Exception:
+                    pass
                 try:
                     subprocess.run(["stty", "echo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
                 except Exception:

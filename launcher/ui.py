@@ -21,30 +21,13 @@ from .connection_manager import ConnectionProgressStep
 logger = logging.getLogger("Arcade.UI")
 
 
-def blank_system_framebuffer() -> None:
-    """Clear framebuffer and hide terminal cursor on Linux / EmuELEC."""
+def clear_terminal_screen() -> None:
+    """Clear terminal screen and hide cursor without touching raw framebuffer."""
     try:
         sys.stdout.write("\033[2J\033[H\033[?25l")
         sys.stdout.flush()
     except Exception:
         pass
-
-    if sys.platform.startswith("linux"):
-        import shutil
-        if shutil.which("emuelec-utils"):
-            try:
-                subprocess.run(["emuelec-utils", "blank_buffer"],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.0)
-            except Exception:
-                pass
-        for dev in ("/dev/tty0", "/dev/tty1", "/dev/console"):
-            if os.path.exists(dev) and os.access(dev, os.W_OK):
-                try:
-                    subprocess.run(["reset"],
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.0)
-                    break
-                except Exception:
-                    pass
 
 
 class ArcadeTUI:
@@ -57,7 +40,7 @@ class ArcadeTUI:
 
     def init_curses(self) -> bool:
         """Initialize curses display."""
-        blank_system_framebuffer()
+        clear_terminal_screen()
         try:
             import curses
             self.curses = curses
@@ -89,7 +72,7 @@ class ArcadeTUI:
             return False
 
     def restore_terminal(self) -> None:
-        """Restore normal terminal settings and blank framebuffer for game display."""
+        """Restore normal terminal settings and clear screen for game display."""
         if self.curses_available and self.stdscr:
             try:
                 self.stdscr.clear()
@@ -111,7 +94,7 @@ class ArcadeTUI:
                 pass
             self.curses_available = False
 
-        blank_system_framebuffer()
+        clear_terminal_screen()
 
     def draw_box(self, title: str, lines: List[str], footer: str = "") -> None:
         """Draw a retro arcade bordered window."""
