@@ -276,7 +276,7 @@ class RetroArchController:
         """Terminate active RetroArch process if currently running."""
         if self.active_process and self.active_process.poll() is None:
             try:
-                self.active_process.send_signal(signal.SIGTERM)
+                self.active_process.terminate()
                 try:
                     self.active_process.wait(timeout=3.0)
                 except subprocess.TimeoutExpired:

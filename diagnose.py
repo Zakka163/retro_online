@@ -57,6 +57,8 @@ def check_port(port: int) -> bool:
 
 
 def run_diagnostics(server_url: str = "http://localhost:8080"):
+    if sys.platform == "win32":
+        os.system("")  # Enable ANSI color escape codes on Windows CMD/PowerShell
     print(f"{BOLD}===================================================={RESET}")
     print(f"{BOLD}{YELLOW}   ARCADE ONLINE PREFLIGHT DIAGNOSTIC TOOL        {RESET}")
     print(f"{BOLD}===================================================={RESET}")
@@ -161,6 +163,16 @@ def run_diagnostics(server_url: str = "http://localhost:8080"):
 
 
 if __name__ == "__main__":
-    url = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8080"
+    url = None
+    if len(sys.argv) > 1:
+        url = sys.argv[1]
+    else:
+        try:
+            with open("config.json", "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+                url = cfg.get("server", {}).get("url")
+        except Exception:
+            pass
+    url = url or "http://localhost:8080"
     run_diagnostics(server_url=url)
 

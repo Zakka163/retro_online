@@ -72,9 +72,23 @@ def find_retroarch_binary(custom_path: Optional[str] = None) -> Optional[str]:
             "/usr/local/bin/retroarch",
         ]
     elif system == "Windows":
+        appdata = os.environ.get("APPDATA", "")
+        localappdata = os.environ.get("LOCALAPPDATA", "")
+        prog_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+        prog_files_x86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+        userprofile = os.environ.get("USERPROFILE", "")
         candidates = [
             r"C:\RetroArch-Win64\retroarch.exe",
-            r"C:\Program Files\RetroArch\retroarch.exe",
+            r"C:\RetroArch\retroarch.exe",
+            os.path.join(prog_files, "RetroArch", "retroarch.exe"),
+            os.path.join(prog_files_x86, "RetroArch", "retroarch.exe"),
+            os.path.join(appdata, "RetroArch", "retroarch.exe"),
+            os.path.join(localappdata, "RetroArch", "retroarch.exe"),
+            os.path.join(prog_files_x86, "Steam", "steamapps", "common", "RetroArch", "retroarch.exe"),
+            os.path.join(prog_files, "Steam", "steamapps", "common", "RetroArch", "retroarch.exe"),
+            os.path.join(userprofile, "RetroArch", "retroarch.exe"),
+            r"D:\RetroArch-Win64\retroarch.exe",
+            r"D:\RetroArch\retroarch.exe",
         ]
 
     for candidate in candidates:
@@ -128,6 +142,23 @@ def find_core_library(core_name: str, core_aliases: Optional[List[str]] = None,
             os.path.expanduser("~/Library/Application Support/RetroArch/cores"),
             "/Applications/RetroArch.app/Contents/Resources/cores",
             "/opt/homebrew/lib/libretro",
+        ])
+    elif system == "Windows":
+        appdata = os.environ.get("APPDATA", "")
+        localappdata = os.environ.get("LOCALAPPDATA", "")
+        prog_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+        prog_files_x86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+        search_dirs.extend([
+            os.path.join(appdata, "RetroArch", "cores"),
+            os.path.join(localappdata, "RetroArch", "cores"),
+            r"C:\RetroArch-Win64\cores",
+            r"C:\RetroArch\cores",
+            os.path.join(prog_files, "RetroArch", "cores"),
+            os.path.join(prog_files_x86, "RetroArch", "cores"),
+            os.path.join(prog_files_x86, "Steam", "steamapps", "common", "RetroArch", "cores"),
+            os.path.join(prog_files, "Steam", "steamapps", "common", "RetroArch", "cores"),
+            r"D:\RetroArch-Win64\cores",
+            r"D:\RetroArch\cores",
         ])
 
     for directory in search_dirs:

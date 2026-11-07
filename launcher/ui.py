@@ -195,6 +195,9 @@ class ArcadeCLI:
 
     @staticmethod
     def show_banner():
+        if sys.platform == "win32":
+            import os
+            os.system("")  # Enable ANSI VT100 colors in Windows Command Prompt and PowerShell
         print("========================================")
         print("             ARCADE ONLINE              ")
         print("   One-Click Multiplayer RetroArch     ")

@@ -271,16 +271,96 @@ class ArcadeLauncherApp:
             self.api.leave_room(room_id, client_id, client_token)
 
     def run_interactive(self) -> None:
-        """Run the interactive Arcade Curses frontend."""
+        """Run the interactive Arcade Curses frontend, or interactive CLI on platforms without curses."""
         if not self.ui.init_curses():
-            print("Peringatan: Curses tidak tersedia pada terminal ini. Beralih ke CLI mode.")
-            self.run_cli_list()
+            logger.info("Curses tidak tersedia pada terminal ini. Mengaktifkan mode interaktif CLI.")
+            self._run_cli_interactive_menu()
             return
 
         try:
             self._main_menu_loop()
         finally:
             self.ui.restore_terminal()
+
+    def _run_cli_interactive_menu(self) -> None:
+        """Interactive text-based menu when curses is not available (e.g. Windows without windows-curses)."""
+        ArcadeCLI.show_banner()
+        if sys.platform == "win32":
+            print("\n[INFO WINDOWS]")
+            print("  Untuk antarmuka grafis terminal (TUI) bergaya arcade di Windows,")
+            print("  Anda dapat menginstal: pip install windows-curses\n")
+
+        while True:
+            print("\n================= MENU UTAMA =================")
+            print(" 1. Buat Room (Host Permainan)")
+            print(" 2. Cari & Gabung Room (Client)")
+            print(" 3. Pindai Ulang Core & ROM (Rescan)")
+            print(" 4. Lihat Log Sistem")
+            print(" 5. Keluar")
+            print("==============================================")
+            try:
+                choice = input("Pilih menu [1-5]: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\nKeluar dari Arcade Launcher.")
+                break
+
+            if choice == "1":
+                games = self.manifest.list_games()
+                ready = [g for g in games if g.get("status") == "ready"]
+                if not ready:
+                    print("\n[!] Belum ada ROM yang siap dimainkan.")
+                    print("    Letakkan file ROM arcade (.zip) di folder ROM Anda, lalu pilih menu 3 (Rescan).")
+                    continue
+
+                print("\nPilih Game untuk Host:")
+                for i, g in enumerate(ready, 1):
+                    print(f"  {i}. {g.get('display_name')} ({g.get('rom_file')}) -> Core: {g.get('retroarch_core')}")
+                try:
+                    g_choice = input(f"Pilih game [1-{len(ready)}] (Enter untuk 1): ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    continue
+                idx = int(g_choice) - 1 if g_choice.isdigit() and 1 <= int(g_choice) <= len(ready) else 0
+                selected_game = ready[idx]
+                try:
+                    r_name = input(f"Nama Room [Room {self.player_name}]: ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    r_name = ""
+                r_name = r_name or f"Room {self.player_name}"
+                self.run_cli_create(selected_game["game_id"], r_name)
+
+            elif choice == "2":
+                print("\nMencari room online di server...")
+                rooms = self.api.list_rooms()
+                if not rooms:
+                    print("[i] Saat ini belum ada room yang aktif di server.")
+                    continue
+                print(f"\nDaftar Room Online ({len(rooms)}):")
+                for i, r in enumerate(rooms, 1):
+                    print(f"  {i}. [{r['room_id']}] {r['name']} | Game: {r['game_id']} | Host: {r['host_name']}")
+                try:
+                    r_choice = input(f"\nPilih nomor room [1-{len(rooms)}] atau ketik Room ID (Enter untuk batal): ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    continue
+                if not r_choice:
+                    continue
+                target_room_id = None
+                if r_choice.isdigit() and 1 <= int(r_choice) <= len(rooms):
+                    target_room_id = rooms[int(r_choice) - 1]["room_id"]
+                else:
+                    target_room_id = r_choice
+                self.run_cli_join(target_room_id)
+
+            elif choice == "3":
+                self.run_cli_scan()
+
+            elif choice == "4":
+                self.run_show_logs()
+
+            elif choice == "5" or choice.lower() in ("q", "exit"):
+                print("Terima kasih telah bermain!")
+                break
+            else:
+                print("Pilihan tidak valid. Silakan pilih 1-5.")
 
     def _main_menu_loop(self) -> None:
         """Layar 1: Pemilihan Game & Scanner."""

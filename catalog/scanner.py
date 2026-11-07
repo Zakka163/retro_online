@@ -179,9 +179,21 @@ class SystemScanner:
                 "/usr/local/lib/libretro",
             ])
         elif system == "Windows":
+            appdata = os.environ.get("APPDATA", "")
+            localappdata = os.environ.get("LOCALAPPDATA", "")
+            prog_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+            prog_files_x86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
             dirs.extend([
+                os.path.join(appdata, "RetroArch", "cores"),
+                os.path.join(localappdata, "RetroArch", "cores"),
                 r"C:\RetroArch-Win64\cores",
-                r"C:\Program Files\RetroArch\cores",
+                r"C:\RetroArch\cores",
+                os.path.join(prog_files, "RetroArch", "cores"),
+                os.path.join(prog_files_x86, "RetroArch", "cores"),
+                os.path.join(prog_files_x86, "Steam", "steamapps", "common", "RetroArch", "cores"),
+                os.path.join(prog_files, "Steam", "steamapps", "common", "RetroArch", "cores"),
+                r"D:\RetroArch-Win64\cores",
+                r"D:\RetroArch\cores",
             ])
 
         return [d for d in dirs if os.path.isdir(d)]
@@ -282,6 +294,26 @@ class SystemScanner:
                         p = os.path.join(vol, sub)
                         if os.path.isdir(p):
                             dirs.append(p)
+
+        elif system == "Windows":
+            user_profile = os.environ.get("USERPROFILE", os.path.expanduser("~"))
+            dirs.extend([
+                os.path.join(user_profile, "Downloads", "roms"),
+                os.path.join(user_profile, "roms"),
+                os.path.join(user_profile, "RetroArch", "roms"),
+                r"C:\roms",
+                r"C:\RetroArch-Win64\roms",
+                r"C:\RetroArch\roms",
+                r"C:\Program Files\RetroArch\roms",
+                r"D:\roms",
+                r"D:\RetroArch-Win64\roms",
+                r"E:\roms",
+            ])
+            for drive in ["C:", "D:", "E:", "F:"]:
+                for sub in [r"\roms\mame", r"\roms\arcade", r"\roms\fbneo", r"\roms\snes", r"\Downloads\roms"]:
+                    p = drive + sub
+                    if os.path.isdir(p):
+                        dirs.append(p)
 
         # Remove duplicates while preserving order
         unique_dirs = []
