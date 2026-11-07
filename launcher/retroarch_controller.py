@@ -197,9 +197,25 @@ class RetroArchController:
                 error_message=None
             )
 
+        # Blank OSD plane and silence terminal echoing on Linux / EmuELEC
+        is_linux = sys.platform.startswith("linux")
+        fb_blank_path = "/sys/class/graphics/fb0/blank"
+        if is_linux:
+            try:
+                subprocess.run(["stty", "-echo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
+            except Exception:
+                pass
+            if os.path.exists(fb_blank_path):
+                try:
+                    with open(fb_blank_path, "w") as f:
+                        f.write("1\n")
+                except Exception:
+                    pass
+
         try:
             self.active_process = subprocess.Popen(
                 cmd,
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True
@@ -273,6 +289,17 @@ class RetroArchController:
             )
         finally:
             self.active_process = None
+            if is_linux:
+                if os.path.exists(fb_blank_path):
+                    try:
+                        with open(fb_blank_path, "w") as f:
+                            f.write("0\n")
+                    except Exception:
+                        pass
+                try:
+                    subprocess.run(["stty", "echo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
+                except Exception:
+                    pass
             self.cleanup()
 
     def terminate(self) -> None:
