@@ -3,7 +3,7 @@
   "server": {
     "url": "http://217.216.146.15:8080",
     "timeout_seconds": 8.0,
-    "heartbeat_interval_seconds": 15.0
+    "heartbeat_interval_seconds": 5.0
   },
   "client": {
     "player_name": "ArcadeCab1",

@@ -58,8 +58,8 @@ class Room:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to JSON-serializable dictionary for API clients."""
         now = time.time()
-        host_active = (now - self.host.last_heartbeat) < 10.0
-        client_active = (self.client is not None) and ((now - self.client.last_heartbeat) < 10.0)
+        host_active = (now - self.host.last_heartbeat) < 30.0
+        client_active = (self.client is not None) and ((now - self.client.last_heartbeat) < 30.0)
         return {
             "room_id": self.room_id,
             "game_id": self.game_id,

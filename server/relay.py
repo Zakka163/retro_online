@@ -156,6 +156,9 @@ class RelayServer:
                     conn.close()
                     return
 
+                # Reset timeout so the socket does not time out while waiting for the other player
+                conn.settimeout(None)
+
                 if role == "HOST":
                     if session.host_sock:
                         conn.sendall(b"ERR HOST_ALREADY_CONNECTED\n")
@@ -202,7 +205,7 @@ class RelayServer:
                     s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
                 except OSError:
                     pass
-                s.settimeout(15.0)
+                s.settimeout(30.0)
                 s.sendall(b"OK CONNECTED\n")
 
             sockets = [h_sock, c_sock]
@@ -267,23 +270,66 @@ class LocalRelayBridge:
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self.disconnect_event = threading.Event()
+        self.ready_event = threading.Event()
+        self._client_listen_sock: Optional[socket.socket] = None
 
     def start(self) -> None:
         self._running = True
+        if self.role == "CLIENT":
+            try:
+                self._client_listen_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self._client_listen_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                self._client_listen_sock.bind(("127.0.0.1", self.local_target_port))
+                self._client_listen_sock.listen(1)
+                self._client_listen_sock.settimeout(30.0)
+                logger.info(f"[LocalRelayBridge] Port listening Client {self.local_target_port} siap.")
+            except Exception as e:
+                logger.warning(f"[LocalRelayBridge] Pre-bind listen port {self.local_target_port} error: {e}")
+        self.ready_event.set()
         self._thread = threading.Thread(target=self._run_bridge, daemon=True)
         self._thread.start()
 
     def stop(self) -> None:
         self._running = False
         self._stop_event.set()
+        if self._client_listen_sock:
+            try:
+                self._client_listen_sock.close()
+            except Exception:
+                pass
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1.0)
 
     def _run_bridge(self) -> None:
         """Connect to Relay VPS, authenticate, and bridge with local socket."""
+        relay_sock = None
+        local_sock = None
         try:
-            # 1. Connect to Relay Server
+            # 1. Handle local socket connection
+            if self.role == "CLIENT":
+                # For Client: accept local RetroArch client connection
+                listen_sock = self._client_listen_sock
+                if listen_sock is None:
+                    listen_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    listen_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    listen_sock.bind(("127.0.0.1", self.local_target_port))
+                    listen_sock.listen(1)
+                    listen_sock.settimeout(30.0)
+
+                try:
+                    logger.info(f"[LocalRelayBridge] Menunggu koneksi RetroArch Client di 127.0.0.1:{self.local_target_port}...")
+                    local_sock, _ = listen_sock.accept()
+                    logger.info("[LocalRelayBridge] RetroArch Client berhasil terhubung ke bridge lokal!")
+                finally:
+                    try:
+                        listen_sock.close()
+                    except Exception:
+                        pass
+                    self._client_listen_sock = None
+
+            # 2. Connect to Relay Server
             relay_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            relay_sock.settimeout(30.0)
             relay_sock.connect((self.relay_host, self.relay_port))
             relay_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
@@ -291,53 +337,53 @@ class LocalRelayBridge:
             handshake = f"ARCADE_RELAY {self.session_id} {self.token} {self.role}\n"
             relay_sock.sendall(handshake.encode("utf-8"))
 
-            # Read confirmation
+            # Read confirmation (wait up to 60s for the other player)
+            relay_sock.settimeout(60.0)
             response = b""
-            while b"\n" not in response:
-                chunk = relay_sock.recv(64)
-                if not chunk:
-                    break
-                response += chunk
+            while b"\n" not in response and not self._stop_event.is_set():
+                try:
+                    chunk = relay_sock.recv(64)
+                    if not chunk:
+                        break
+                    response += chunk
+                except (socket.timeout, BlockingIOError):
+                    continue
 
             if b"OK CONNECTED" not in response:
-                relay_sock.close()
+                logger.warning(f"[LocalRelayBridge] Handshake relay gagal atau ditutup: {response}")
+                if relay_sock:
+                    relay_sock.close()
                 return
 
-            # 2. Connect to or accept local RetroArch socket
+            # 3. For Host: bridge connects to local RetroArch server listening on local_target_port
             if self.role == "HOST":
-                # For Host: bridge connects to local RetroArch server listening on local_target_port
-                local_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                # Retry local connect as RetroArch might take a moment to bind
                 connected = False
-                for _ in range(30):
+                for attempt in range(60):
                     if self._stop_event.is_set():
                         break
                     try:
-                        local_sock.connect(("127.0.0.1", self.local_target_port))
+                        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        s.connect(("127.0.0.1", self.local_target_port))
+                        local_sock = s
                         connected = True
+                        logger.info(f"[LocalRelayBridge] Berhasil terhubung ke RetroArch Host lokal pada port {self.local_target_port} (percobaan ke-{attempt+1})")
                         break
-                    except ConnectionRefusedError:
+                    except (ConnectionRefusedError, OSError):
+                        try:
+                            s.close()
+                        except Exception:
+                            pass
                         time.sleep(0.2)
 
                 if not connected:
-                    relay_sock.close()
+                    logger.error(f"[LocalRelayBridge] Gagal terhubung ke RetroArch Host lokal pada port {self.local_target_port} setelah 12 detik!")
+                    if relay_sock:
+                        relay_sock.close()
                     return
-            else:
-                # For Client: wait for local RetroArch client to connect to local listening port
-                listen_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                listen_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                listen_sock.bind(("127.0.0.1", self.local_target_port))
-                listen_sock.listen(1)
-                listen_sock.settimeout(30.0)
-
-                try:
-                    local_sock, _ = listen_sock.accept()
-                finally:
-                    listen_sock.close()
 
             local_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
-            # 3. Bidirectional pipe between relay_sock and local_sock
+            # 4. Bidirectional pipe between relay_sock and local_sock
             for s in (relay_sock, local_sock):
                 try:
                     s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
@@ -346,7 +392,7 @@ class LocalRelayBridge:
                     s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
                 except OSError:
                     pass
-                s.settimeout(15.0)
+                s.settimeout(30.0)
 
             sockets = [relay_sock, local_sock]
 
@@ -383,11 +429,18 @@ class LocalRelayBridge:
         finally:
             if not self._stop_event.is_set():
                 self.disconnect_event.set()
-            try:
-                relay_sock.close()
-            except Exception:
-                pass
-            try:
-                local_sock.close()
-            except Exception:
-                pass
+            if relay_sock:
+                try:
+                    relay_sock.close()
+                except Exception:
+                    pass
+            if local_sock:
+                try:
+                    local_sock.close()
+                except Exception:
+                    pass
+            if self._client_listen_sock:
+                try:
+                    self._client_listen_sock.close()
+                except Exception:
+                    pass

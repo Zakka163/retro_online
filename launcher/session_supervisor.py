@@ -26,6 +26,7 @@ class SessionSupervisor:
                  token: str, role: str, ra_controller: RetroArchController,
                  local_bridge: Optional[LocalRelayBridge] = None,
                  poll_interval: float = 1.0,
+                 max_network_failures: int = 5,
                  on_disconnect: Optional[Callable[[str], None]] = None):
         self.api = api
         self.room_id = room_id
@@ -35,6 +36,7 @@ class SessionSupervisor:
         self.ra_controller = ra_controller
         self.local_bridge = local_bridge
         self.poll_interval = poll_interval
+        self.max_network_failures = max_network_failures
         self.on_disconnect = on_disconnect
 
         self._stop_event = threading.Event()
@@ -166,10 +168,10 @@ class SessionSupervisor:
                 logger.debug(f"Room query warning: {e}")
                 network_call_failed = True
 
-            # If local internet connection drops completely (3 consecutive failures)
+            # If local internet connection drops completely (e.g. 5 consecutive timeouts ~= 15s)
             if network_call_failed:
                 self._network_failure_count += 1
-                if self._network_failure_count >= 3:
+                if self._network_failure_count >= self.max_network_failures:
                     self._trigger_disconnect("Koneksi internet Anda terputus di tengah permainan.")
                     return
             else:
