@@ -15,8 +15,10 @@
     "custom_cores_dir": null,
     "custom_roms_dir": null,
     "fullscreen": true,
-    "check_frames": 0,
-    "input_latency_frames": 2
+    "check_frames": 30,
+    "input_latency_frames": 2,
+    "stateless_mode": false,
+    "sync_sram": true
   }
 }
 

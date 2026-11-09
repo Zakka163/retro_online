@@ -36,11 +36,19 @@ class ArcadeLauncherApp:
                  custom_rom_dirs: Optional[List[str]] = None,
                  custom_core_dirs: Optional[List[str]] = None,
                  dry_run: bool = False,
-                 fullscreen: bool = True):
+                 fullscreen: bool = True,
+                 check_frames: int = 30,
+                 input_latency_frames: int = 2,
+                 stateless_mode: bool = False,
+                 sync_sram: bool = True):
         self.server_url = server_url
         self.player_name = player_name
         self.dry_run = dry_run
         self.fullscreen = fullscreen
+        self.check_frames = check_frames
+        self.input_latency_frames = input_latency_frames
+        self.stateless_mode = stateless_mode
+        self.sync_sram = sync_sram
         self.custom_rom_dirs = custom_rom_dirs or []
         self.custom_core_dirs = custom_core_dirs or []
 
@@ -183,7 +191,11 @@ class ArcadeLauncherApp:
                 nickname=self.player_name,
                 session_id=room_id,
                 retroarch_bin=ra_bin,
-                fullscreen=self.fullscreen
+                fullscreen=self.fullscreen,
+                check_frames=self.check_frames,
+                input_latency_frames=self.input_latency_frames,
+                stateless_mode=self.stateless_mode,
+                sync_sram=self.sync_sram
             )
 
             supervisor = SessionSupervisor(
@@ -281,7 +293,11 @@ class ArcadeLauncherApp:
             nickname=self.player_name,
             session_id=room_id,
             retroarch_bin=ra_bin,
-            fullscreen=self.fullscreen
+            fullscreen=self.fullscreen,
+            check_frames=self.check_frames,
+            input_latency_frames=self.input_latency_frames,
+            stateless_mode=self.stateless_mode,
+            sync_sram=self.sync_sram
         )
 
         supervisor = SessionSupervisor(
@@ -650,7 +666,11 @@ class ArcadeLauncherApp:
                 nickname=self.player_name,
                 session_id=room_id,
                 retroarch_bin=ra_bin,
-                fullscreen=self.fullscreen
+                fullscreen=self.fullscreen,
+                check_frames=self.check_frames,
+                input_latency_frames=self.input_latency_frames,
+                stateless_mode=self.stateless_mode,
+                sync_sram=self.sync_sram
             )
             supervisor = SessionSupervisor(
                 api=self.api,
@@ -750,7 +770,12 @@ class ArcadeLauncherApp:
             connect_ip=result.target_ip,
             nickname=self.player_name,
             session_id=room["room_id"],
-            retroarch_bin=ra_bin
+            retroarch_bin=ra_bin,
+            fullscreen=self.fullscreen,
+            check_frames=self.check_frames,
+            input_latency_frames=self.input_latency_frames,
+            stateless_mode=self.stateless_mode,
+            sync_sram=self.sync_sram
         )
 
         supervisor = SessionSupervisor(
@@ -814,6 +839,9 @@ def main() -> None:
                         help="Game ID for room creation (default: sf2)")
     parser.add_argument("--room-name", help="Custom room name")
     parser.add_argument("--join", help="Join room by Room ID via CLI")
+    parser.add_argument("--check-frames", type=int, help="Netplay sync check interval in frames (e.g. 30)")
+    parser.add_argument("--input-latency", type=int, help="Netplay input delay buffer in frames (e.g. 2)")
+    parser.add_argument("--stateless", action="store_true", default=None, help="Force stateless/lockstep mode")
 
     args = parser.parse_args()
 
@@ -881,13 +909,22 @@ def main() -> None:
     if cfg_core and cfg_core not in custom_cores:
         custom_cores.append(cfg_core)
 
+    check_frames = args.check_frames if args.check_frames is not None else cfg.get("retroarch", {}).get("check_frames", 30)
+    input_latency = args.input_latency if args.input_latency is not None else cfg.get("retroarch", {}).get("input_latency_frames", 2)
+    stateless = args.stateless if args.stateless is not None else cfg.get("retroarch", {}).get("stateless_mode", False)
+    sync_sram = cfg.get("retroarch", {}).get("sync_sram", True)
+
     app = ArcadeLauncherApp(
         server_url=server_url,
         retroarch_bin=ra_bin,
         player_name=player_name,
         custom_rom_dirs=custom_roms,
         custom_core_dirs=custom_cores,
-        dry_run=args.dry_run
+        dry_run=args.dry_run,
+        check_frames=check_frames,
+        input_latency_frames=input_latency,
+        stateless_mode=stateless,
+        sync_sram=sync_sram
     )
 
     if args.scan:

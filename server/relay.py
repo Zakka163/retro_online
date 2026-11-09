@@ -13,27 +13,33 @@ import uuid
 import logging
 from typing import Dict, Optional, Tuple, Any
 
-logger = logging.getLogger("ArcadeRelay")
+logger = logging.getLogger("Arcade.Relay")
 
 
 class RelaySession:
     """Manages an active relay bridge for a matched room pair."""
 
-    def __init__(self, session_id: str, room_id: str, token: str, max_duration: float = 7200.0):
+    def __init__(self, session_id: str, room_id: str, token: str, max_duration: float = 7200.0,
+                 reconnect_timeout: float = 15.0):
         self.session_id = session_id
         self.room_id = room_id
         self.token = token
         self.max_duration = max_duration
+        self.reconnect_timeout = reconnect_timeout
         self.created_at = time.time()
-        self.status = "waiting"  # 'waiting', 'bridged', 'closed'
+        self.status = "waiting"  # 'waiting', 'bridged', 'reconnecting', 'closed'
 
         self.host_sock: Optional[socket.socket] = None
         self.client_sock: Optional[socket.socket] = None
+
+        self.pending_to_host = bytearray()
+        self.pending_to_client = bytearray()
 
         self.bytes_host_to_client = 0
         self.bytes_client_to_host = 0
         self.last_activity = time.time()
         self._close_event = threading.Event()
+        self._disconnect_start: Optional[float] = None
 
     @property
     def is_expired(self) -> bool:
@@ -159,24 +165,58 @@ class RelayServer:
                 # Reset timeout so the socket does not time out while waiting for the other player
                 conn.settimeout(None)
 
+                # Configure socket for reliable, low-latency streaming
+                try:
+                    conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                    conn.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                    conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 262144)
+                    conn.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
+                except OSError:
+                    pass
+
+                is_reconnect = False
                 if role == "HOST":
                     if session.host_sock:
-                        conn.sendall(b"ERR HOST_ALREADY_CONNECTED\n")
-                        conn.close()
-                        return
+                        is_reconnect = True
+                        try:
+                            session.host_sock.close()
+                        except Exception:
+                            pass
                     session.host_sock = conn
                 elif role == "CLIENT":
                     if session.client_sock:
-                        conn.sendall(b"ERR CLIENT_ALREADY_CONNECTED\n")
-                        conn.close()
-                        return
+                        is_reconnect = True
+                        try:
+                            session.client_sock.close()
+                        except Exception:
+                            pass
                     session.client_sock = conn
                 else:
                     conn.sendall(b"ERR UNKNOWN_ROLE\n")
                     conn.close()
                     return
 
-                # If both sides are now present, initiate bidirectional bridge!
+                # If this is a reconnect during an active or reconnecting session
+                if is_reconnect or session.status in ("bridged", "reconnecting"):
+                    conn.sendall(b"OK CONNECTED\n")
+                    if role == "HOST" and session.pending_to_host:
+                        try:
+                            conn.sendall(bytes(session.pending_to_host))
+                            session.pending_to_host.clear()
+                        except Exception:
+                            pass
+                    elif role == "CLIENT" and session.pending_to_client:
+                        try:
+                            conn.sendall(bytes(session.pending_to_client))
+                            session.pending_to_client.clear()
+                        except Exception:
+                            pass
+                    session.status = "bridged"
+                    session._disconnect_start = None
+                    logger.info(f"[RelayServer] {role} berhasil RECONNECT untuk room {session.room_id}")
+                    return
+
+                # If both sides are now present for the first time, initiate bidirectional bridge!
                 if session.host_sock and session.client_sock:
                     session.status = "bridged"
                     threading.Thread(target=self._bridge_session, args=(session,), daemon=True).start()
@@ -189,63 +229,107 @@ class RelayServer:
                 pass
 
     def _bridge_session(self, session: RelaySession) -> None:
-        """Forward all traffic bidirectionally with TCP_NODELAY enabled."""
+        """Forward all traffic bidirectionally with TCP_NODELAY and reconnect tolerance."""
         h_sock = session.host_sock
         c_sock = session.client_sock
         if not h_sock or not c_sock:
             return
 
         try:
-            # Configure sockets for reliable, low-latency streaming
             for s in (h_sock, c_sock):
-                try:
-                    s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                    s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-                    s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 262144)
-                    s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
-                except OSError:
-                    pass
                 s.settimeout(30.0)
                 s.sendall(b"OK CONNECTED\n")
 
-            sockets = [h_sock, c_sock]
-
             while self._running and not session._close_event.is_set():
-                try:
-                    rlist, _, _ = select.select(sockets, [], [], 1.0)
-                except (ValueError, OSError):
+                h_sock = session.host_sock
+                c_sock = session.client_sock
+
+                active_sockets = [s for s in (h_sock, c_sock) if s is not None]
+                if not active_sockets:
                     break
 
+                # Check if one peer disconnected and we are in reconnect grace period
+                if len(active_sockets) < 2:
+                    if session._disconnect_start is None:
+                        session._disconnect_start = time.time()
+                    if (time.time() - session._disconnect_start) > session.reconnect_timeout:
+                        logger.info(f"[RelayServer] Reconnect timeout ({session.reconnect_timeout}s) tercapai untuk room {session.room_id}.")
+                        break
+                else:
+                    session._disconnect_start = None
+
+                try:
+                    rlist, _, _ = select.select(active_sockets, [], [], 0.5)
+                except (ValueError, OSError):
+                    continue
+
                 for s in rlist:
-                    other = c_sock if s is h_sock else h_sock
-                    s_role = "HOST" if s is h_sock else "CLIENT"
+                    is_h = (s is session.host_sock)
+                    other = session.client_sock if is_h else session.host_sock
+                    s_role = "HOST" if is_h else "CLIENT"
+
                     try:
                         data = s.recv(65536)
                         if not data:
-                            logger.info(f"[RelayServer] {s_role} menutup koneksi relay (EOF) untuk room {session.room_id}")
-                            session.close()
-                            return
+                            logger.info(f"[RelayServer] {s_role} socket terputus (EOF) untuk room {session.room_id}. Menunggu reconnect...")
+                            with self._lock:
+                                if is_h:
+                                    session.host_sock = None
+                                else:
+                                    session.client_sock = None
+                                session.status = "reconnecting"
+                                session._disconnect_start = time.time()
+                            try:
+                                s.close()
+                            except Exception:
+                                pass
+                            break
 
                         session.last_activity = time.time()
-                        other.sendall(data)
+                        if other:
+                            other.sendall(data)
+                        else:
+                            # Buffer packets while the other side is reconnecting
+                            buf = session.pending_to_client if is_h else session.pending_to_host
+                            if len(buf) < 1048576:
+                                buf.extend(data)
 
-                        if s is h_sock:
+                        if is_h:
                             session.bytes_host_to_client += len(data)
                         else:
                             session.bytes_client_to_host += len(data)
                     except (socket.timeout, BlockingIOError, InterruptedError):
                         continue
-                    except (ConnectionResetError, BrokenPipeError):
-                        logger.info(f"[RelayServer] {s_role} connection reset untuk room {session.room_id}")
-                        session.close()
-                        return
+                    except (ConnectionResetError, BrokenPipeError) as e:
+                        logger.info(f"[RelayServer] {s_role} connection reset ({e}) untuk room {session.room_id}. Menunggu reconnect...")
+                        with self._lock:
+                            if is_h:
+                                session.host_sock = None
+                            else:
+                                session.client_sock = None
+                            session.status = "reconnecting"
+                            session._disconnect_start = time.time()
+                        try:
+                            s.close()
+                        except Exception:
+                            pass
+                        break
                     except Exception as e:
-                        logger.warning(f"[RelayServer] Relay error: {e}")
-                        session.close()
-                        return
+                        logger.warning(f"[RelayServer] Relay error pada {s_role}: {e}")
+                        with self._lock:
+                            if is_h:
+                                session.host_sock = None
+                            else:
+                                session.client_sock = None
+                            session.status = "reconnecting"
+                            session._disconnect_start = time.time()
+                        try:
+                            s.close()
+                        except Exception:
+                            pass
+                        break
 
         except (OSError, ValueError):
-            # Normal socket shutdown/close during session termination
             session.close()
         except Exception as e:
             if not session._close_event.is_set():
@@ -259,13 +343,15 @@ class LocalRelayBridge:
     """Client-side local bridge running on arcade cabinet to pipe RetroArch through Relay."""
 
     def __init__(self, relay_host: str, relay_port: int, session_id: str,
-                 token: str, role: str, local_target_port: int):
+                 token: str, role: str, local_target_port: int,
+                 reconnect_timeout: float = 15.0):
         self.relay_host = relay_host
         self.relay_port = relay_port
         self.session_id = session_id
         self.token = token
         self.role = role.upper()
         self.local_target_port = local_target_port
+        self.reconnect_timeout = reconnect_timeout
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
@@ -300,6 +386,49 @@ class LocalRelayBridge:
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1.0)
 
+    def _connect_relay_socket(self, timeout: float = 8.0) -> Optional[socket.socket]:
+        """Establish outbound socket to Relay Server and complete authentication."""
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+            sock.connect((self.relay_host, self.relay_port))
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
+            handshake = f"ARCADE_RELAY {self.session_id} {self.token} {self.role}\n"
+            sock.sendall(handshake.encode("utf-8"))
+
+            sock.settimeout(timeout)
+            response = b""
+            while b"\n" not in response and not self._stop_event.is_set():
+                try:
+                    chunk = sock.recv(64)
+                    if not chunk:
+                        break
+                    response += chunk
+                except (socket.timeout, BlockingIOError):
+                    continue
+
+            if b"OK CONNECTED" in response:
+                try:
+                    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 262144)
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
+                except OSError:
+                    pass
+                sock.settimeout(30.0)
+                return sock
+            else:
+                logger.debug(f"[LocalRelayBridge] Handshake relay ditolak / respon: {response}")
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+                return None
+        except Exception as e:
+            logger.debug(f"[LocalRelayBridge] Gagal terhubung ke relay: {e}")
+            return None
+
     def _run_bridge(self) -> None:
         """Connect to Relay VPS, authenticate, and bridge with local socket."""
         relay_sock = None
@@ -307,7 +436,6 @@ class LocalRelayBridge:
         try:
             # 1. Handle local socket connection
             if self.role == "CLIENT":
-                # For Client: accept local RetroArch client connection
                 listen_sock = self._client_listen_sock
                 if listen_sock is None:
                     listen_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -327,32 +455,11 @@ class LocalRelayBridge:
                         pass
                     self._client_listen_sock = None
 
-            # 2. Connect to Relay Server
-            relay_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            relay_sock.settimeout(30.0)
-            relay_sock.connect((self.relay_host, self.relay_port))
-            relay_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-
-            # Send handshake
-            handshake = f"ARCADE_RELAY {self.session_id} {self.token} {self.role}\n"
-            relay_sock.sendall(handshake.encode("utf-8"))
-
-            # Read confirmation (wait up to 60s for the other player)
-            relay_sock.settimeout(60.0)
-            response = b""
-            while b"\n" not in response and not self._stop_event.is_set():
-                try:
-                    chunk = relay_sock.recv(64)
-                    if not chunk:
-                        break
-                    response += chunk
-                except (socket.timeout, BlockingIOError):
-                    continue
-
-            if b"OK CONNECTED" not in response:
-                logger.warning(f"[LocalRelayBridge] Handshake relay gagal atau ditutup: {response}")
-                if relay_sock:
-                    relay_sock.close()
+            # 2. Connect to Relay Server (wait up to 60s initially for opponent)
+            logger.info(f"[LocalRelayBridge] Menghubungkan ke Relay VPS {self.relay_host}:{self.relay_port}...")
+            relay_sock = self._connect_relay_socket(timeout=60.0)
+            if not relay_sock:
+                logger.warning("[LocalRelayBridge] Handshake relay gagal atau ditutup.")
                 return
 
             # 3. For Host: bridge connects to local RetroArch server listening on local_target_port
@@ -381,18 +488,14 @@ class LocalRelayBridge:
                         relay_sock.close()
                     return
 
-            local_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-
-            # 4. Bidirectional pipe between relay_sock and local_sock
-            for s in (relay_sock, local_sock):
-                try:
-                    s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                    s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-                    s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 262144)
-                    s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
-                except OSError:
-                    pass
-                s.settimeout(30.0)
+            try:
+                local_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                local_sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                local_sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 262144)
+                local_sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
+            except OSError:
+                pass
+            local_sock.settimeout(30.0)
 
             sockets = [relay_sock, local_sock]
 
@@ -403,25 +506,90 @@ class LocalRelayBridge:
                     break
 
                 for s in rlist:
-                    other = local_sock if s is relay_sock else relay_sock
-                    s_name = "RetroArch Lokal" if s is local_sock else "Relay VPS"
-                    try:
-                        data = s.recv(65536)
-                        if not data:
-                            logger.info(f"[LocalRelayBridge] Koneksi {s_name} ditutup (EOF).")
+                    if s is local_sock:
+                        # Traffic from local RetroArch to Relay VPS
+                        try:
+                            data = local_sock.recv(65536)
+                            if not data:
+                                logger.info("[LocalRelayBridge] RetroArch lokal ditutup (EOF).")
+                                self.disconnect_event.set()
+                                return
+                            if relay_sock:
+                                relay_sock.sendall(data)
+                        except (socket.timeout, BlockingIOError, InterruptedError):
+                            continue
+                        except (ConnectionResetError, BrokenPipeError):
+                            logger.info("[LocalRelayBridge] Koneksi RetroArch lokal terputus.")
                             self.disconnect_event.set()
                             return
-                        other.sendall(data)
-                    except (socket.timeout, BlockingIOError, InterruptedError):
-                        continue
-                    except (ConnectionResetError, BrokenPipeError) as e:
-                        logger.info(f"[LocalRelayBridge] Koneksi {s_name} terputus: {e}")
-                        self.disconnect_event.set()
-                        return
-                    except Exception as e:
-                        logger.warning(f"[LocalRelayBridge] Error pada {s_name}: {e}")
-                        self.disconnect_event.set()
-                        return
+                        except Exception as e:
+                            logger.warning(f"[LocalRelayBridge] Error pada RetroArch lokal: {e}")
+                            self.disconnect_event.set()
+                            return
+
+                    elif s is relay_sock:
+                        # Traffic from Relay VPS to local RetroArch
+                        relay_failed = False
+                        try:
+                            data = relay_sock.recv(65536)
+                            if not data:
+                                logger.info("[LocalRelayBridge] Koneksi Relay VPS ditutup (EOF).")
+                                relay_failed = True
+                            else:
+                                local_sock.sendall(data)
+                        except (socket.timeout, BlockingIOError, InterruptedError):
+                            continue
+                        except (ConnectionResetError, BrokenPipeError) as e:
+                            logger.info(f"[LocalRelayBridge] Koneksi Relay VPS terputus: {e}")
+                            relay_failed = True
+                        except Exception as e:
+                            logger.warning(f"[LocalRelayBridge] Error pada Relay VPS: {e}")
+                            relay_failed = True
+
+                        if relay_failed:
+                            # Do not kill local RetroArch immediately! Attempt auto-reconnect to VPS
+                            try:
+                                relay_sock.close()
+                            except Exception:
+                                pass
+                            relay_sock = None
+
+                            logger.warning(
+                                f"[LocalRelayBridge] Jalur ke Relay VPS terputus. "
+                                f"Mencoba reconnect otomatis (toleransi {self.reconnect_timeout}s)..."
+                            )
+
+                            reconnect_start = time.time()
+                            while (
+                                self._running
+                                and not self._stop_event.is_set()
+                                and (time.time() - reconnect_start) < self.reconnect_timeout
+                            ):
+                                # Check if local RetroArch is still alive during reconnect wait
+                                try:
+                                    r_local, _, _ = select.select([local_sock], [], [], 0.2)
+                                    if r_local:
+                                        peek = local_sock.recv(1, socket.MSG_PEEK)
+                                        if not peek:
+                                            logger.info("[LocalRelayBridge] RetroArch lokal ditutup saat reconnect.")
+                                            self.disconnect_event.set()
+                                            return
+                                except Exception:
+                                    self.disconnect_event.set()
+                                    return
+
+                                new_relay = self._connect_relay_socket(timeout=3.0)
+                                if new_relay:
+                                    relay_sock = new_relay
+                                    sockets = [relay_sock, local_sock]
+                                    logger.info("[LocalRelayBridge] Berhasil RECONNECT ke Relay VPS! Melanjutkan permainan...")
+                                    break
+                                time.sleep(0.5)
+
+                            if not relay_sock:
+                                logger.error(f"[LocalRelayBridge] Gagal reconnect ke Relay VPS setelah {self.reconnect_timeout}s.")
+                                self.disconnect_event.set()
+                                return
 
         except Exception as e:
             logger.debug(f"LocalRelayBridge exception: {e}")

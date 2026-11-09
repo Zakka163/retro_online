@@ -27,8 +27,10 @@ class RetroArchLaunchConfig:
     port: int = 55435               # Netplay port
     connect_ip: Optional[str] = None# Target IP/hostname (client mode only)
     nickname: str = "ArcadePlayer"  # Netplay nickname
-    check_frames: int = 30          # Netplay sync check frames
-    input_latency_frames: int = 0   # Netplay input delay frames (0 for rollback)
+    check_frames: int = 30          # Netplay sync check frames (30 = checks every 0.5s)
+    input_latency_frames: int = 2   # Netplay input delay frames (2 = 33ms buffer to prevent rollback desync)
+    stateless_mode: bool = False    # True = 100% lockstep determinism; False = rollback
+    sync_sram: bool = True          # True = sync host save RAM to client on connect
     session_id: str = "default"     # Unique session ID
     fullscreen: bool = True         # Run fullscreen
     retroarch_bin: Optional[str] = None # Path to RetroArch executable
@@ -84,7 +86,8 @@ class RetroArchController:
             'netplay_input_latency_frames_range = "2"',
             'netplay_ping_timeout = "30"',
             'netplay_max_ping = "0"',
-            'netplay_stateless_mode = "false"',
+            f'netplay_stateless_mode = "{"true" if config.stateless_mode else "false"}"',
+            f'netplay_sync_sram = "{"true" if config.sync_sram else "false"}"',
             'netplay_public_announce = "false"',
             'netplay_require_slang = "false"',
             'netplay_use_mitm_server = "false"',
