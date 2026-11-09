@@ -113,24 +113,28 @@ class SessionSupervisor:
                     self._trigger_disconnect("Jalur koneksi Relay Netplay terputus.")
                     return
 
-            # 3. Send heartbeat to server to keep room alive (using fast timeout)
+            # 3. Send heartbeat to server to keep room alive (using resilient timeout)
             network_call_failed = False
             try:
-                hb_ok = self.api.send_heartbeat(self.room_id, self.player_id, self.token, timeout=2.0)
+                hb_ok = self.api.send_heartbeat(self.room_id, self.player_id, self.token,
+                                                 timeout=3.0, raise_on_error=True)
                 if not hb_ok:
-                    # Check if room is closed
-                    room = self.api.get_room(self.room_id, timeout=2.0)
-                    if not room:
-                        self._trigger_disconnect("Room di server telah ditutup oleh lawan atau kedaluwarsa.")
-                        return
+                    # Heartbeat explicitly rejected by server (e.g. 404 Room expired or 403 token invalid)
+                    try:
+                        room = self.api.get_room(self.room_id, timeout=3.0, raise_on_error=True)
+                        if room is None:
+                            self._trigger_disconnect("Room di server telah ditutup oleh lawan atau kedaluwarsa.")
+                            return
+                    except Exception:
+                        network_call_failed = True
             except Exception as e:
                 logger.debug(f"Heartbeat check exception: {e}")
                 network_call_failed = True
 
             # 4. Check room state and peer presence on server
             try:
-                room = self.api.get_room(self.room_id, timeout=2.0)
-                if not room:
+                room = self.api.get_room(self.room_id, timeout=3.0, raise_on_error=True)
+                if room is None:
                     self._trigger_disconnect("Room telah ditutup atau lawan keluar.")
                     return
 
@@ -171,6 +175,10 @@ class SessionSupervisor:
             # If local internet connection drops completely (e.g. 5 consecutive timeouts ~= 15s)
             if network_call_failed:
                 self._network_failure_count += 1
+                logger.warning(
+                    f"Gangguan koneksi HTTP ke server ({self._network_failure_count}/{self.max_network_failures}). "
+                    f"Mencoba mempertahankan sesi..."
+                )
                 if self._network_failure_count >= self.max_network_failures:
                     self._trigger_disconnect("Koneksi internet Anda terputus di tengah permainan.")
                     return

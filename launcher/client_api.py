@@ -93,12 +93,29 @@ class ArcadeClientAPI:
             return rooms
         return []
 
-    def get_room(self, room_id: str, timeout: Optional[float] = None) -> Optional[Dict[str, Any]]:
-        """Fetch details of a specific room."""
+    def get_room(self, room_id: str, timeout: Optional[float] = None,
+                 raise_on_error: bool = False) -> Optional[Dict[str, Any]]:
+        """Fetch details of a specific room.
+        
+        Returns:
+            room dict if room exists (HTTP 200).
+            None if room was not found / deleted / expired (HTTP 404).
+            
+        Raises:
+            ConnectionError if network timeout/failure occurs and raise_on_error is True.
+        """
         status, data = self._request("GET", f"/api/rooms/{room_id}", timeout=timeout)
         if status == 200:
             return data.get("room")
-        logger.warning(f"Room {room_id} tidak ditemukan pada server.")
+        if status == 404:
+            logger.warning(f"Room {room_id} tidak ditemukan pada server.")
+            return None
+
+        err_msg = data.get("message") or f"HTTP {status}"
+        logger.warning(f"Gagal memeriksa status room {room_id} (Status {status}): {err_msg}")
+        if raise_on_error or status >= 500 or data.get("code") in ("NETWORK_ERROR", "SERVICE_UNAVAILABLE"):
+            if raise_on_error:
+                raise ConnectionError(f"Gagal menghubungi server untuk room {room_id}: {err_msg}")
         return None
 
     def create_room(self, game_id: str, room_name: str, host_name: str,
@@ -154,11 +171,24 @@ class ArcadeClientAPI:
         return status == 200
 
     def send_heartbeat(self, room_id: str, player_id: str, token: str,
-                       timeout: Optional[float] = None) -> bool:
-        """Keep room and session alive."""
+                       timeout: Optional[float] = None,
+                       raise_on_error: bool = False) -> bool:
+        """Keep room and session alive.
+        
+        Returns:
+            True if heartbeat acknowledged by server (HTTP 200).
+            False if rejected by server (e.g. 400/403/404 room expired or token invalid).
+            
+        Raises:
+            ConnectionError if network timeout/failure occurs and raise_on_error is True.
+        """
         payload = {"player_id": player_id, "token": token}
-        status, _ = self._request("POST", f"/api/rooms/{room_id}/heartbeat", body=payload, timeout=timeout)
-        return status == 200
+        status, data = self._request("POST", f"/api/rooms/{room_id}/heartbeat", body=payload, timeout=timeout)
+        if status == 200:
+            return True
+        if raise_on_error and (status >= 500 or data.get("code") in ("NETWORK_ERROR", "SERVICE_UNAVAILABLE")):
+            raise ConnectionError(f"Heartbeat network error: {data.get('message', status)}")
+        return False
 
     def send_signal(self, room_id: str, sender_id: str, event: str,
                     payload: Optional[Dict[str, Any]] = None,

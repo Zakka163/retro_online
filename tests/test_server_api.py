@@ -3,10 +3,12 @@
 import io
 import json
 import unittest
+from unittest.mock import patch
 from server.api import ArcadeAPIHandler
 from server.room_store import RoomStore
 from server.signaling import SignalingHub
 from server.relay import RelayServer
+from launcher.client_api import ArcadeClientAPI
 
 
 class MockSocket:
@@ -122,6 +124,29 @@ class TestServerAPI(unittest.TestCase):
         self.assertTrue(resp_json.get("ok"))
         self.assertIn("client_token", resp_json)
         self.assertEqual(store.get_room(room.room_id).client.name, "Ken")
+
+
+class TestArcadeClientAPIErrors(unittest.TestCase):
+    def setUp(self):
+        self.api = ArcadeClientAPI(server_url="http://mock-server.test")
+
+    @patch.object(ArcadeClientAPI, "_request")
+    def test_get_room_not_found(self, mock_request):
+        mock_request.return_value = (404, {"error": True, "message": "Room not found"})
+        res = self.api.get_room("room123", raise_on_error=True)
+        self.assertIsNone(res)
+
+    @patch.object(ArcadeClientAPI, "_request")
+    def test_get_room_timeout_raises(self, mock_request):
+        mock_request.return_value = (500, {"error": True, "code": "NETWORK_ERROR", "message": "timed out"})
+        with self.assertRaises(ConnectionError):
+            self.api.get_room("room123", raise_on_error=True)
+
+    @patch.object(ArcadeClientAPI, "_request")
+    def test_send_heartbeat_timeout_raises(self, mock_request):
+        mock_request.return_value = (500, {"error": True, "code": "NETWORK_ERROR", "message": "timed out"})
+        with self.assertRaises(ConnectionError):
+            self.api.send_heartbeat("room123", "p1", "token1", raise_on_error=True)
 
 
 if __name__ == "__main__":

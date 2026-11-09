@@ -60,6 +60,7 @@ class RetroArchController:
                 self.retroarch_bin = None
         self.active_process: Optional[subprocess.Popen] = None
         self.temp_config_paths: set = set()
+        self._was_terminated: bool = False
 
     @property
     def temp_config_path(self) -> Optional[str]:
@@ -157,6 +158,7 @@ class RetroArchController:
                on_started: Optional[Callable[[], None]] = None,
                dry_run: bool = False) -> RetroArchProcessResult:
         """Launch RetroArch process, supervise its execution, and clean up afterwards."""
+        self._was_terminated = False
         # 1. Check for mock execution environment
         is_mock = dry_run or bool(os.environ.get("ARCADE_MOCK_RETROARCH"))
 
@@ -255,9 +257,17 @@ class RetroArchController:
 
             # Detect premature shutdown (< 2.0s) where core failed to load content
             is_premature = (duration < 2.0)
-            is_normal_exit = exit_code in (0, -15, 130)  # 0: Clean Exit, -15: SIGTERM, 130: SIGINT (Ctrl+C)
+            is_windows = sys.platform.startswith("win")
+            # Normal exits: 0 (clean quit), -15 (SIGTERM), 130 (SIGINT / Ctrl+C),
+            # or explicitly terminated by supervisor/launcher (self._was_terminated),
+            # or exit code 1 on Windows (standard result of TerminateProcess when terminated)
+            is_normal_exit = (
+                exit_code in (0, -15, 130)
+                or self._was_terminated
+                or (is_windows and exit_code == 1 and not is_premature)
+            )
 
-            if is_normal_exit and is_premature:
+            if is_normal_exit and is_premature and not self._was_terminated:
                 status = "FAILED"
                 cname = os.path.basename(config.core_path)
                 rname = os.path.basename(config.rom_path)
@@ -332,6 +342,7 @@ class RetroArchController:
 
     def terminate(self) -> None:
         """Terminate active RetroArch process if currently running."""
+        self._was_terminated = True
         if self.active_process and self.active_process.poll() is None:
             try:
                 self.active_process.terminate()

@@ -2,6 +2,7 @@
 
 import os
 import unittest
+from unittest.mock import MagicMock, patch
 from launcher.retroarch_controller import (
     RetroArchController,
     RetroArchLaunchConfig,
@@ -133,6 +134,35 @@ class TestRetroArchController(unittest.TestCase):
         self.assertEqual(result.status, "FAILED")
         self.assertEqual(result.exit_code, -1)
         self.assertIn("Executable RetroArch tidak ditemukan", result.error_message)
+
+    @patch("subprocess.Popen")
+    @patch("os.path.isfile", return_value=True)
+    def test_terminated_process_returns_completed_status(self, mock_isfile, mock_popen):
+        mock_proc = MagicMock()
+        mock_proc.communicate.return_value = ("", "")
+        mock_proc.returncode = 1  # Exit code 1 as in Windows TerminateProcess
+        mock_popen.return_value = mock_proc
+
+        cfg = RetroArchLaunchConfig(
+            mode="host",
+            core_path="/core.so",
+            rom_path="/sf2.zip",
+            retroarch_bin="/usr/bin/retroarch"
+        )
+        # Simulate supervisor calling terminate while process was running
+        self.controller.active_process = mock_proc
+        self.controller.terminate()
+        self.assertTrue(self.controller._was_terminated)
+
+        # Force _was_terminated to remain True for this test run
+        def set_proc():
+            self.controller.active_process = mock_proc
+            self.controller._was_terminated = True
+
+        result = self.controller.launch(cfg, on_started=set_proc)
+        self.assertEqual(result.status, "COMPLETED")
+        self.assertEqual(result.exit_code, 1)
+        self.assertIsNone(result.error_message)
 
 
 if __name__ == "__main__":

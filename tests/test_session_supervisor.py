@@ -169,6 +169,45 @@ class TestSessionSupervisor(unittest.TestCase):
         self.assertIn("terputus di tengah permainan", supervisor.disconnect_reason)
         self.mock_ra_controller.terminate.assert_called_once()
 
+    def test_transient_network_timeout_does_not_disconnect(self):
+        """Transient HTTP timeouts (< max_network_failures) should not disconnect session."""
+        call_count = {"hb": 0, "room": 0}
+
+        def mock_heartbeat(*args, **kwargs):
+            call_count["hb"] += 1
+            if call_count["hb"] <= 2:
+                raise ConnectionError("timed out")
+            return True
+
+        def mock_get_room(*args, **kwargs):
+            call_count["room"] += 1
+            if call_count["room"] <= 2:
+                raise ConnectionError("timed out")
+            return {"has_client": True, "status": "playing", "client_active": True}
+
+        self.mock_api.send_heartbeat.side_effect = mock_heartbeat
+        self.mock_api.get_room.side_effect = mock_get_room
+        self.mock_api.poll_signals.return_value = []
+
+        supervisor = SessionSupervisor(
+            api=self.mock_api,
+            room_id="room_transient",
+            player_id="p1",
+            token="token1",
+            role="host",
+            ra_controller=self.mock_ra_controller,
+            poll_interval=0.03,
+            max_network_failures=5
+        )
+
+        supervisor.start()
+        time.sleep(0.2)
+        supervisor.stop()
+
+        self.assertFalse(supervisor.peer_disconnected)
+        self.mock_ra_controller.terminate.assert_not_called()
+        self.assertEqual(supervisor._network_failure_count, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
