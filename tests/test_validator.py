@@ -69,10 +69,11 @@ class TestCatalogValidator(unittest.TestCase):
             self.assertEqual(details["rom_path"], self.sf2_path)
 
             # Test peer compatibility check
+            expected_core = validator.manifest.get_game("sf2")["retroarch_core"]
             compat_valid, err = validator.check_peer_compatibility(
                 "sf2",
                 {
-                    "core": "mame2003_plus",
+                    "core": expected_core,
                     "core_version": "auto"
                 }
             )

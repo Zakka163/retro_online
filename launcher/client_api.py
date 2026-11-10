@@ -89,7 +89,7 @@ class ArcadeClientAPI:
         status, data = self._request("GET", path)
         if status == 200:
             rooms = data.get("rooms", [])
-            logger.info(f"Daftar room dimuat: {len(rooms)} room aktif ditemukan (Filter: {game_id or 'SEMUA'})")
+            logger.debug(f"Daftar room dimuat: {len(rooms)} room aktif ditemukan (Filter: {game_id or 'SEMUA'})")
             return rooms
         return []
 

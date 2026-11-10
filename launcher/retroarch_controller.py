@@ -75,7 +75,7 @@ class RetroArchController:
 
     def create_session_config(self, config: RetroArchLaunchConfig) -> str:
         """Create an isolated temporary append-config file for the Netplay session."""
-        mode_val = "0" if config.mode == "host" else "1"
+        mode_val = "false" if config.mode == "host" else "true"
         lines = [
             "# Auto-generated Arcade Netplay temporary session config",
             "# Automatically removed upon session exit",
@@ -92,7 +92,18 @@ class RetroArchController:
             'netplay_public_announce = "false"',
             'netplay_require_slang = "false"',
             'netplay_use_mitm_server = "false"',
+            # Anti-desync safeguards: disable features that alter frame execution
+            'run_ahead_enabled = "false"',
+            'run_ahead_secondary_instance = "false"',
+            'rewind_enable = "false"',
+            'cheats_enable = "false"',
+            # Isolate savefile directory so both players boot from an identical clean RAM state
+            f'savefile_directory = "{tempfile.gettempdir()}"',
+            f'savestate_directory = "{tempfile.gettempdir()}"',
         ]
+
+        if config.mode == "client" and config.connect_ip:
+            lines.append(f'netplay_ip_address = "{config.connect_ip}"')
 
         if config.fullscreen:
             lines.append('video_fullscreen = "true"')
@@ -123,6 +134,7 @@ class RetroArchController:
 
         cmd = [
             binary,
+            "-v",
             "-L", config.core_path,
             config.rom_path,
             "--port", str(config.port),
@@ -247,12 +259,19 @@ class RetroArchController:
             exit_code = self.active_process.returncode
             duration = time.time() - start_time
 
-            # Log any RetroArch [ERROR] messages found in stdout or stderr
+            # Log any RetroArch [ERROR] or netplay diagnostic messages found in stdout or stderr
             combined_output = (stdout or "") + "\n" + (stderr or "")
-            log_errors = [l.strip() for l in combined_output.splitlines() if "[ERROR]" in l or "failed to open" in l.lower()]
+            log_errors = [
+                l.strip() for l in combined_output.splitlines()
+                if "[ERROR]" in l
+                or "[netplay]" in l.lower()
+                or "failed to" in l.lower()
+                or "mismatch" in l.lower()
+                or "failed to open" in l.lower()
+            ]
             if log_errors:
-                logger.warning("Log kesalahan dari RetroArch:")
-                for le in log_errors[:5]:
+                logger.warning("Log diagnosa / kesalahan dari RetroArch:")
+                for le in log_errors[:10]:
                     logger.warning(f"  -> {le}")
 
             # Detect premature shutdown (< 2.0s) where core failed to load content

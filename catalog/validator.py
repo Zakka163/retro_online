@@ -184,7 +184,8 @@ def find_core_library(core_name: str, core_aliases: Optional[List[str]] = None,
 class GameManifest:
     """Manages the catalog of supported arcade games and compatibility parameters."""
 
-    def __init__(self, manifest_path: Optional[str] = None, auto_scan: bool = True):
+    def __init__(self, manifest_path: Optional[str] = None, auto_scan: bool = True,
+                 scanner: Optional[Any] = None):
         if not manifest_path:
             manifest_path = os.path.join(os.path.dirname(__file__), "manifest.json")
         self.manifest_path = manifest_path
@@ -192,7 +193,7 @@ class GameManifest:
         self.games: Dict[str, Dict[str, Any]] = {}
         self.load()
         if auto_scan and not os.environ.get("ARCADE_DISABLE_AUTOSCAN"):
-            self.scan_and_merge()
+            self.scan_and_merge(scanner)
 
     def load(self) -> None:
         if not os.path.exists(self.manifest_path):
@@ -211,6 +212,8 @@ class GameManifest:
                 if gid not in self.games:
                     self.games[gid] = scanned.to_dict()
                 else:
+                    self.games[gid]["retroarch_core"] = scanned.core_name
+                    self.games[gid]["core_path"] = scanned.core_path
                     self.games[gid]["scanned_rom_path"] = scanned.rom_path
                     self.games[gid]["scanned_core_path"] = scanned.core_path
                     self.games[gid]["status"] = scanned.status
@@ -241,8 +244,18 @@ class CatalogValidator:
 
     def _default_rom_dirs(self) -> List[str]:
         dirs = []
+        # Priority default: local project / bundled 'roms' folder
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        local_roms = os.path.join(base_dir, "roms")
+        if os.path.isdir(local_roms) and local_roms not in dirs:
+            dirs.append(local_roms)
+
+        cwd_roms = os.path.abspath("roms")
+        if os.path.isdir(cwd_roms) and cwd_roms not in dirs:
+            dirs.append(cwd_roms)
+
         env_rom_dir = os.environ.get("ARCADE_ROMS_DIR")
-        if env_rom_dir:
+        if env_rom_dir and env_rom_dir not in dirs:
             dirs.append(env_rom_dir)
         system = platform.system()
         if system == "Linux":

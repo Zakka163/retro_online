@@ -92,14 +92,13 @@ ARCADE_DATABASE = {
     "1944": "1944: The Loop Master",
 }
 
-# Preferred arcade cores in order of netplay reliability
+# Preferred arcade cores in order of netplay reliability (FBNeo priority for netplay)
 PREFERRED_ARCADE_CORES = [
     "fbneo",
-    "mame2003_plus",
-    "mame2003",
+    "fbalpha2012",
     "fbalpha",
-    "mame",
-    "mame2010",
+    "fbneo_cps12",
+    "fbneo_neogeo",
 ]
 
 
@@ -141,9 +140,11 @@ class SystemScanner:
 
     def __init__(self, custom_rom_dirs: Optional[List[str]] = None,
                  custom_core_dirs: Optional[List[str]] = None,
-                 cache_file: Optional[str] = None):
+                 cache_file: Optional[str] = None,
+                 preferred_arcade_cores: Optional[List[str]] = None):
         self.custom_rom_dirs = custom_rom_dirs or []
         self.custom_core_dirs = custom_core_dirs or []
+        self.preferred_arcade_cores = preferred_arcade_cores or PREFERRED_ARCADE_CORES
         self.cache_file = cache_file or os.path.expanduser("~/.arcade_online_cache.json")
         self.installed_cores: Dict[str, str] = {}  # core_name -> path
         self.discovered_games: Dict[str, ScannedGame] = {}
@@ -251,10 +252,22 @@ class SystemScanner:
         """Auto-detect all possible arcade ROM paths on internal and external drives."""
         dirs = []
         if self.custom_rom_dirs:
-            dirs.extend(self.custom_rom_dirs)
+            for d in self.custom_rom_dirs:
+                if d and d not in dirs:
+                    dirs.append(d)
+
+        # Priority default: local project / bundled 'roms' folder
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        local_roms = os.path.join(base_dir, "roms")
+        if os.path.isdir(local_roms) and local_roms not in dirs:
+            dirs.append(local_roms)
+
+        cwd_roms = os.path.abspath("roms")
+        if os.path.isdir(cwd_roms) and cwd_roms not in dirs:
+            dirs.append(cwd_roms)
 
         env_roms = os.environ.get("ARCADE_ROMS_DIR")
-        if env_roms:
+        if env_roms and env_roms not in dirs:
             dirs.append(env_roms)
 
         system = platform.system()
@@ -385,15 +398,15 @@ class SystemScanner:
             return "fceumm", ""
 
         # Arcade cores in order
-        for pref in PREFERRED_ARCADE_CORES:
+        for pref in self.preferred_arcade_cores:
             if pref in self.installed_cores:
                 return pref, self.installed_cores[pref]
 
         for name, path in self.installed_cores.items():
-            if any(k in name for k in ("mame", "fb", "arcade", "neo")):
+            if any(k in name for k in ("fb", "neo", "alpha")):
                 return name, path
 
-        return "mame2003_plus", ""
+        return "fbneo", ""
 
     def scan_roms(self, max_depth: int = 2) -> Dict[str, ScannedGame]:
         """Scan directories for arcade ROM files (.zip, .7z) and identify them dynamically."""
@@ -455,8 +468,8 @@ class SystemScanner:
             except Exception as e:
                 logger.debug(f"Error scanning ROM directory {rom_dir}: {e}")
 
-        # Fallback only when in explicit headless mock test environment with no ROMs
-        if not found_games and os.environ.get("ARCADE_FORCE_MOCK_GAME"):
+        # Ensure mock game available when in explicit headless mock test environment
+        if os.environ.get("ARCADE_FORCE_MOCK_GAME") and "sf2" not in found_games:
             mock_game = ScannedGame(
                 game_id="sf2",
                 display_name=ARCADE_DATABASE.get("sf2", "Street Fighter II"),

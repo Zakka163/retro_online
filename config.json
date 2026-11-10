@@ -13,12 +13,12 @@
   "retroarch": {
     "binary_path": null,
     "custom_cores_dir": null,
-    "custom_roms_dir": null,
+    "custom_roms_dir": "roms",
     "fullscreen": true,
     "check_frames": 30,
     "input_latency_frames": 2,
     "stateless_mode": false,
-    "sync_sram": true
+    "sync_sram": false,
+    "preferred_arcade_core": "fbneo"
   }
 }
-

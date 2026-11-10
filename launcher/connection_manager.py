@@ -121,6 +121,12 @@ class ConnectionManager:
         try:
             probe_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             probe_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                import struct
+                # Avoid TIME_WAIT on netplay_port when probe socket closes
+                probe_sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack('ii', 1, 0))
+            except Exception:
+                pass
             probe_sock.bind(("0.0.0.0", netplay_port))
             probe_sock.listen(1)
             probe_sock.setblocking(False)
@@ -149,6 +155,11 @@ class ConnectionManager:
                 if probe_sock:
                     try:
                         conn, client_addr = probe_sock.accept()
+                        try:
+                            import struct
+                            conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack('ii', 1, 0))
+                        except Exception:
+                            pass
                         conn.close()
                         logger.info(f"[Host] Probe langsung dari Client diterima dari {client_addr}! Mode: DIRECT P2P.")
                         self.api.send_signal(room_id, host_id, "connection.direct_success")

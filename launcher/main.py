@@ -23,7 +23,10 @@ from .connection_manager import ConnectionManager, ConnectionProgressStep, ERROR
 from .ui import ArcadeTUI, ArcadeCLI
 from .logger import setup_launcher_logging, get_recent_logs
 from .session_supervisor import SessionSupervisor
+from datetime import datetime
+import platform
 
+log_file = f"scan_{datetime.now():%Y%m%d_%H%M%S}_{platform.node()}.txt"
 logger = logging.getLogger("Arcade.Launcher")
 
 
@@ -40,7 +43,8 @@ class ArcadeLauncherApp:
                  check_frames: int = 30,
                  input_latency_frames: int = 2,
                  stateless_mode: bool = False,
-                 sync_sram: bool = True):
+                 sync_sram: bool = True,
+                 preferred_arcade_cores: Optional[List[str]] = None):
         self.server_url = server_url
         self.player_name = player_name
         self.dry_run = dry_run
@@ -51,13 +55,15 @@ class ArcadeLauncherApp:
         self.sync_sram = sync_sram
         self.custom_rom_dirs = custom_rom_dirs or []
         self.custom_core_dirs = custom_core_dirs or []
+        self.preferred_arcade_cores = preferred_arcade_cores
 
         from catalog.scanner import SystemScanner
         self.scanner = SystemScanner(
             custom_rom_dirs=self.custom_rom_dirs,
-            custom_core_dirs=self.custom_core_dirs
+            custom_core_dirs=self.custom_core_dirs,
+            preferred_arcade_cores=self.preferred_arcade_cores
         )
-        self.manifest = GameManifest()
+        self.manifest = GameManifest(scanner=self.scanner)
         # Merge dynamically scanned games on startup
         self.manifest.scan_and_merge(self.scanner)
 
@@ -82,26 +88,46 @@ class ArcadeLauncherApp:
         )
         logger.info(f"Katalog game: {len(self.manifest.list_games())} judul game terdaftar.")
 
+
+
     def run_cli_scan(self) -> None:
         """Scan disk and list all discovered arcade ROMs and cores."""
+        log = logging.getLogger("arcade_scan")
+        log.setLevel(logging.INFO)
+
+        if not log.handlers:
+            handler = logging.FileHandler(log_file, encoding="utf-8")
+            handler.setFormatter(logging.Formatter("%(message)s"))
+            log.addHandler(handler)
+
+        def output(message: str = "") -> None:
+            print(message)
+            log.info(message)
+
         ArcadeCLI.show_banner()
-        print("Memindai sistem untuk emulator RetroArch, core libretro, dan ROM arcade...")
+        output("Memindai sistem untuk emulator RetroArch, core libretro, dan ROM arcade...")
         cores = self.scanner.scan_installed_cores()
-        print(f"\n[+] Core Libretro Terdeteksi ({len(cores)}):")
+        output(f"\n[+] Core Libretro Terdeteksi ({len(cores)}):")
         for cname, cpath in cores.items():
-            print(f"  - {cname}: {cpath}")
+            output(f"  - {cname}: {cpath}")
 
         rom_dirs = self.scanner.get_system_rom_directories()
-        print(f"\n[+] Direktori ROM Dipindai ({len(rom_dirs)}):")
+        output(f"\n[+] Direktori ROM Dipindai ({len(rom_dirs)}):")
         for d in rom_dirs:
-            print(f"  - {d}")
+            output(f"  - {d}")
 
         games = self.scanner.scan_roms()
         ready_games = [g for g in games.values() if g.status == "ready"]
-        print(f"\n[+] Game Arcade Ditemukan: {len(games)} (Siap dimainkan: {len(ready_games)}):")
+        output(
+            f"\n[+] Game Arcade Ditemukan: {len(games)} "
+            f"(Siap dimainkan: {len(ready_games)}):"
+        )
         for g in games.values():
             status_tag = "[READY]" if g.status == "ready" else "[MISSING CORE]"
-            print(f"  - {status_tag} {g.display_name} ({g.rom_file}) -> Core: {g.core_name}")
+            output(
+                f"  - {status_tag} {g.display_name} "
+                f"({g.rom_file}) -> Core: {g.core_name}"
+            )
 
     def run_cli_list(self, game_id: Optional[str] = None) -> None:
         """List active rooms from command line."""
@@ -209,9 +235,11 @@ class ArcadeLauncherApp:
             )
             supervisor.start()
 
+            self.ui.pause_gamepad()
             try:
                 res = self.ra_controller.launch(launch_cfg, dry_run=self.dry_run)
             finally:
+                self.ui.resume_gamepad()
                 supervisor.stop()
                 if result.local_bridge:
                     result.local_bridge.stop()
@@ -311,9 +339,16 @@ class ArcadeLauncherApp:
         )
         supervisor.start()
 
+        if result.mode == "direct" and not self.dry_run and not os.environ.get("ARCADE_MOCK_RETROARCH"):
+            # Give Host's RetroArch time to boot and start listening on netplay port
+            logger.info("Direct P2P: Menunggu 1.5 detik agar Host RetroArch siap menerima koneksi...")
+            time.sleep(1.5)
+
+        self.ui.pause_gamepad()
         try:
             res = self.ra_controller.launch(launch_cfg, dry_run=self.dry_run)
         finally:
+            self.ui.resume_gamepad()
             supervisor.stop()
             if result.local_bridge:
                 result.local_bridge.stop()
@@ -456,14 +491,14 @@ class ArcadeLauncherApp:
                 "UP/DOWN: Pilih | ENTER: Buka | ESC: Keluar"
             )
 
-            key = self.ui.stdscr.getch()
-            if key in (27, ord('q'), ord('Q')):  # ESC or q
+            key = self.ui.get_key()
+            if self.ui.is_back(key):
                 break
-            elif key in (self.ui.curses.KEY_UP, ord('w'), ord('W')):
+            elif self.ui.is_up(key):
                 selected_idx = (selected_idx - 1) % len(menu_items)
-            elif key in (self.ui.curses.KEY_DOWN, ord('s'), ord('S')):
+            elif self.ui.is_down(key):
                 selected_idx = (selected_idx + 1) % len(menu_items)
-            elif key in (10, 13, self.ui.curses.KEY_ENTER, ord(' ')):
+            elif self.ui.is_enter(key):
                 _, selected_data = menu_items[selected_idx]
                 if selected_data == "rescan":
                     # Trigger dynamic re-scan
@@ -511,14 +546,14 @@ class ArcadeLauncherApp:
                 "UP/DOWN: Pilih | ENTER: Buka | ESC: Kembali"
             )
 
-            key = self.ui.stdscr.getch()
-            if key in (27, ord('q'), ord('Q')):
+            key = self.ui.get_key()
+            if self.ui.is_back(key):
                 break
-            elif key in (self.ui.curses.KEY_UP, ord('w'), ord('W')):
+            elif self.ui.is_up(key):
                 selected_idx = (selected_idx - 1) % len(actions)
-            elif key in (self.ui.curses.KEY_DOWN, ord('s'), ord('S')):
+            elif self.ui.is_down(key):
                 selected_idx = (selected_idx + 1) % len(actions)
-            elif key in (10, 13, self.ui.curses.KEY_ENTER, ord(' ')):
+            elif self.ui.is_enter(key):
                 action = actions[selected_idx]
                 logger.info(f"Menu Aksi Game '{game.get('display_name')}': Memilih [{action}]")
                 if action in ("CARI ROOM", "BUAT ROOM"):
@@ -563,14 +598,14 @@ class ArcadeLauncherApp:
                 "UP/DOWN: Pilih | ENTER: Gabung | ESC: Batal"
             )
 
-            key = self.ui.stdscr.getch()
-            if key in (27, ord('q'), ord('Q')):
+            key = self.ui.get_key()
+            if self.ui.is_back(key):
                 break
-            elif rooms and key in (self.ui.curses.KEY_UP, ord('w'), ord('W')):
+            elif rooms and self.ui.is_up(key):
                 selected_idx = (selected_idx - 1) % len(rooms)
-            elif rooms and key in (self.ui.curses.KEY_DOWN, ord('s'), ord('S')):
+            elif rooms and self.ui.is_down(key):
                 selected_idx = (selected_idx + 1) % len(rooms)
-            elif rooms and key in (10, 13, self.ui.curses.KEY_ENTER, ord(' ')):
+            elif rooms and self.ui.is_enter(key):
                 selected_room = rooms[selected_idx]
                 self._join_room_flow(game, selected_room)
                 break
@@ -617,8 +652,8 @@ class ArcadeLauncherApp:
                 ]
                 self.ui.draw_box("MENUNGGU LAWAN", lines, "Tekan ESC untuk Batal")
 
-                key = self.ui.stdscr.getch()
-                if key in (27, ord('q'), ord('Q')):
+                key = self.ui.get_key()
+                if self.ui.is_back(key):
                     logger.info(f"Host membatalkan room {room_id}.")
                     return  # Canceled
 
@@ -683,9 +718,11 @@ class ArcadeLauncherApp:
             )
             supervisor.start()
 
+            self.ui.pause_gamepad()
             try:
                 res = self.ra_controller.launch(launch_cfg, dry_run=self.dry_run)
             finally:
+                self.ui.resume_gamepad()
                 supervisor.stop()
                 if result.local_bridge:
                     result.local_bridge.stop()
@@ -789,9 +826,16 @@ class ArcadeLauncherApp:
         )
         supervisor.start()
 
+        if result.mode == "direct" and not self.dry_run and not os.environ.get("ARCADE_MOCK_RETROARCH"):
+            # Give Host's RetroArch time to boot and start listening on netplay port
+            logger.info("Direct P2P: Menunggu 1.5 detik agar Host RetroArch siap menerima koneksi...")
+            time.sleep(1.5)
+
+        self.ui.pause_gamepad()
         try:
             res = self.ra_controller.launch(launch_cfg, dry_run=self.dry_run)
         finally:
+            self.ui.resume_gamepad()
             supervisor.stop()
             if result.local_bridge:
                 result.local_bridge.stop()
@@ -899,10 +943,29 @@ def main() -> None:
         or find_retroarch_binary()
     )
 
-    custom_roms = list(args.rom_dir or [])
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    local_roms = os.path.join(base_dir, "roms")
+    cwd_roms = os.path.abspath("roms")
+
+    custom_roms = []
+    # Highest priority: local project roms folder
+    if os.path.isdir(local_roms):
+        custom_roms.append(local_roms)
+    elif os.path.isdir(cwd_roms):
+        custom_roms.append(cwd_roms)
+
+    # Then CLI arguments or user configuration
+    if args.rom_dir:
+        for r in args.rom_dir:
+            r_abs = os.path.abspath(r) if not os.path.isabs(r) else r
+            if r_abs not in custom_roms:
+                custom_roms.append(r_abs)
+
     cfg_rom = cfg.get("retroarch", {}).get("custom_roms_dir")
-    if cfg_rom and cfg_rom not in custom_roms:
-        custom_roms.append(cfg_rom)
+    if cfg_rom:
+        cfg_rom_abs = os.path.abspath(cfg_rom) if not os.path.isabs(cfg_rom) else cfg_rom
+        if cfg_rom_abs not in custom_roms and os.path.isdir(cfg_rom_abs):
+            custom_roms.append(cfg_rom_abs)
 
     custom_cores = list(args.core_dir or [])
     cfg_core = cfg.get("retroarch", {}).get("custom_cores_dir")
@@ -911,8 +974,10 @@ def main() -> None:
 
     check_frames = args.check_frames if args.check_frames is not None else cfg.get("retroarch", {}).get("check_frames", 30)
     input_latency = args.input_latency if args.input_latency is not None else cfg.get("retroarch", {}).get("input_latency_frames", 2)
-    stateless = args.stateless if args.stateless is not None else cfg.get("retroarch", {}).get("stateless_mode", False)
+    stateless = args.stateless if args.stateless is not None else cfg.get("retroarch", {}).get("stateless_mode", True)
     sync_sram = cfg.get("retroarch", {}).get("sync_sram", True)
+    pref_arcade = cfg.get("retroarch", {}).get("preferred_arcade_core")
+    pref_cores = [pref_arcade] if pref_arcade else None
 
     app = ArcadeLauncherApp(
         server_url=server_url,
@@ -924,7 +989,8 @@ def main() -> None:
         check_frames=check_frames,
         input_latency_frames=input_latency,
         stateless_mode=stateless,
-        sync_sram=sync_sram
+        sync_sram=sync_sram,
+        preferred_arcade_cores=pref_cores
     )
 
     if args.scan:

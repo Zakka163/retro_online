@@ -17,6 +17,8 @@ import logging
 import subprocess
 from typing import List, Optional, Callable, Dict, Any
 from .connection_manager import ConnectionProgressStep
+from .gamepad import ArcadeGamepadListener
+from .retroarch_config import load_retroarch_mapping, RetroArchInputMapping
 
 logger = logging.getLogger("Arcade.UI")
 
@@ -33,10 +35,12 @@ def clear_terminal_screen() -> None:
 class ArcadeTUI:
     """Arcade-friendly terminal UI using curses with graceful fallback."""
 
-    def __init__(self):
+    def __init__(self, mapping: Optional[RetroArchInputMapping] = None):
         self.stdscr = None
         self.curses_available = False
         self.curses = None
+        self.mapping = mapping if isinstance(mapping, RetroArchInputMapping) else load_retroarch_mapping()
+        self.gamepad = ArcadeGamepadListener(mapping=self.mapping)
 
     def init_curses(self) -> bool:
         """Initialize curses display."""
@@ -52,7 +56,7 @@ class ArcadeTUI:
             except Exception:
                 pass
             self.stdscr.keypad(True)
-            self.stdscr.timeout(500)  # 500ms poll timeout
+            self.stdscr.timeout(50)  # 50ms responsive poll timeout
 
             if curses.has_colors():
                 curses.start_color()
@@ -65,6 +69,10 @@ class ArcadeTUI:
 
             self.curses_available = True
             logger.debug("TUI Curses berhasil diinisialisasi.")
+            try:
+                self.gamepad.start()
+            except Exception as e:
+                logger.debug(f"Gamepad listener start failed: {e}")
             return True
         except Exception as e:
             self.curses_available = False
@@ -73,6 +81,9 @@ class ArcadeTUI:
 
     def restore_terminal(self) -> None:
         """Restore normal terminal settings and clear screen for game display."""
+        if self.gamepad:
+            self.gamepad.stop()
+
         if self.curses_available and self.stdscr:
             try:
                 self.stdscr.clear()
@@ -95,6 +106,94 @@ class ArcadeTUI:
             self.curses_available = False
 
         clear_terminal_screen()
+
+    def pause_gamepad(self) -> None:
+        """Pause gamepad listener while external emulator is running."""
+        if self.gamepad:
+            self.gamepad.pause()
+
+    def resume_gamepad(self) -> None:
+        """Resume gamepad listener after external emulator finishes."""
+        if self.gamepad:
+            self.gamepad.resume()
+
+    def get_key(self) -> int:
+        """Get next key event from either Gamepad or Keyboard."""
+        if not self.curses_available or not self.stdscr:
+            return -1
+
+        # 1. Check Gamepad action first
+        if self.gamepad:
+            act = self.gamepad.get_action()
+            if act == "UP":
+                return self.curses.KEY_UP
+            elif act == "DOWN":
+                return self.curses.KEY_DOWN
+            elif act == "LEFT":
+                return self.curses.KEY_LEFT
+            elif act == "RIGHT":
+                return self.curses.KEY_RIGHT
+            elif act == "ENTER":
+                return 10
+            elif act == "BACK":
+                return 27
+
+        # 2. Check Keyboard input (timeout set to 50ms)
+        key = self.stdscr.getch()
+        if key != -1:
+            return key
+
+        # 3. Check Gamepad again in case an action arrived during wait
+        if self.gamepad:
+            act = self.gamepad.get_action()
+            if act == "UP":
+                return self.curses.KEY_UP
+            elif act == "DOWN":
+                return self.curses.KEY_DOWN
+            elif act == "LEFT":
+                return self.curses.KEY_LEFT
+            elif act == "RIGHT":
+                return self.curses.KEY_RIGHT
+            elif act == "ENTER":
+                return 10
+            elif act == "BACK":
+                return 27
+
+        return -1
+
+    def is_up(self, key: int) -> bool:
+        """Check if key corresponds to UP navigation (RetroArch & Arcade)."""
+        if self.curses and key == self.curses.KEY_UP:
+            return True
+        return key in self.mapping.keys_up
+
+    def is_down(self, key: int) -> bool:
+        """Check if key corresponds to DOWN navigation (RetroArch & Arcade)."""
+        if self.curses and key == self.curses.KEY_DOWN:
+            return True
+        return key in self.mapping.keys_down
+
+    def is_left(self, key: int) -> bool:
+        """Check if key corresponds to LEFT navigation (RetroArch & Arcade)."""
+        if self.curses and key == self.curses.KEY_LEFT:
+            return True
+        return key in self.mapping.keys_left
+
+    def is_right(self, key: int) -> bool:
+        """Check if key corresponds to RIGHT navigation (RetroArch & Arcade)."""
+        if self.curses and key == self.curses.KEY_RIGHT:
+            return True
+        return key in self.mapping.keys_right
+
+    def is_enter(self, key: int) -> bool:
+        """Check if key corresponds to ENTER / Confirm (RetroArch A/Start & Arcade P1 Start/Coin)."""
+        if self.curses and key == self.curses.KEY_ENTER:
+            return True
+        return key in self.mapping.keys_enter
+
+    def is_back(self, key: int) -> bool:
+        """Check if key corresponds to BACK / Cancel / Exit (RetroArch B/Select & ESC/Coin/Q)."""
+        return key in self.mapping.keys_back
 
     def draw_box(self, title: str, lines: List[str], footer: str = "") -> None:
         """Draw a retro arcade bordered window."""
@@ -205,12 +304,12 @@ class ArcadeTUI:
                 "UP/DOWN: Gulir | ENTER/ESC: Tutup"
             )
 
-            key = self.stdscr.getch()
-            if key in (27, 10, 13, ord('q'), ord('Q'), ord(' ')):
+            key = self.get_key()
+            if self.is_back(key) or self.is_enter(key):
                 break
-            elif key in (self.curses.KEY_UP, ord('w'), ord('W')):
+            elif self.is_up(key):
                 scroll_offset = min(scroll_offset + 1, max(0, len(logs) - visible_lines_count))
-            elif key in (self.curses.KEY_DOWN, ord('s'), ord('S')):
+            elif self.is_down(key):
                 scroll_offset = max(0, scroll_offset - 1)
 
 

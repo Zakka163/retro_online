@@ -31,12 +31,13 @@ class TestRetroArchController(unittest.TestCase):
 
         with open(temp_cfg, "r") as f:
             content = f.read()
-            self.assertIn('netplay_mode = "0"', content)
+            self.assertIn('netplay_mode = "false"', content)
             self.assertIn('netplay_ip_port = "55435"', content)
             self.assertIn('netplay_nickname = "Player1"', content)
 
         cmd = self.controller.build_command(cfg, temp_cfg)
         self.assertEqual(cmd[0], "/usr/bin/retroarch")
+        self.assertIn("-v", cmd)
         self.assertIn("-L", cmd)
         self.assertIn("/usr/lib/libretro/mame2003_plus_libretro.so", cmd)
         self.assertIn("/roms/sf2.zip", cmd)
@@ -61,8 +62,14 @@ class TestRetroArchController(unittest.TestCase):
             session_id="test5678"
         )
         temp_cfg = self.controller.create_session_config(cfg)
+        with open(temp_cfg, "r") as f:
+            content = f.read()
+            self.assertIn('netplay_mode = "true"', content)
+            self.assertIn('netplay_ip_address = "192.168.1.100"', content)
+
         cmd = self.controller.build_command(cfg, temp_cfg)
 
+        self.assertIn("-v", cmd)
         self.assertIn("--connect", cmd)
         self.assertIn("192.168.1.100", cmd)
         self.assertNotIn("--host", cmd)

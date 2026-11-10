@@ -1,0 +1,137 @@
+Memindai sistem untuk emulator RetroArch, core libretro, dan ROM arcade...
+
+[+] Core Libretro Terdeteksi (115):
+  - 2048: /usr/lib/libretro/2048_libretro.so
+  - 81: /usr/lib/libretro/81_libretro.so
+  - a5200: /usr/lib/libretro/a5200_libretro.so
+  - atari800: /usr/lib/libretro/atari800_libretro.so
+  - bash_launcher: /usr/lib/libretro/bash_launcher_libretro.so
+  - bk: /usr/lib/libretro/bk_libretro.so
+  - bluemsx: /usr/lib/libretro/bluemsx_libretro.so
+  - cannonball: /usr/lib/libretro/cannonball_libretro.so
+  - cap32: /usr/lib/libretro/cap32_libretro.so
+  - daphne: /usr/lib/libretro/daphne_libretro.so
+  - dinothawr: /usr/lib/libretro/dinothawr_libretro.so
+  - dosbox_pure: /usr/lib/libretro/dosbox_pure_libretro.so
+  - dosbox_svn: /usr/lib/libretro/dosbox_svn_libretro.so
+  - easyrpg: /usr/lib/libretro/easyrpg_libretro.so
+  - fake08: /usr/lib/libretro/fake08_libretro.so
+  - fbalpha2012: /usr/lib/libretro/fbalpha2012_libretro.so
+  - fbneo: /usr/lib/libretro/fbneo_libretro.so
+  - fceumm: /usr/lib/libretro/fceumm_libretro.so
+  - fceumm_mod: /usr/lib/libretro/fceumm_mod_libretro.so
+  - flycast: /usr/lib/libretro/flycast_libretro.so
+  - fmsx: /usr/lib/libretro/fmsx_libretro.so
+  - freeintv: /usr/lib/libretro/freeintv_libretro.so
+  - freej2me: /usr/lib/libretro/freej2me_libretro.so
+  - fuse: /usr/lib/libretro/fuse_libretro.so
+  - gambatte: /usr/lib/libretro/gambatte_libretro.so
+  - gearboy: /usr/lib/libretro/gearboy_libretro.so
+  - gearcoleco: /usr/lib/libretro/gearcoleco_libretro.so
+  - geargrafx: /usr/lib/libretro/geargrafx_libretro.so
+  - gearlynx: /usr/lib/libretro/gearlynx_libretro.so
+  - gearsystem: /usr/lib/libretro/gearsystem_libretro.so
+  - genesis_plus_gx_cart_special: /usr/lib/libretro/genesis_plus_gx_cart_special_libretro.so
+  - genesis_plus_gx: /usr/lib/libretro/genesis_plus_gx_libretro.so
+  - genesis_plus_gx_wide: /usr/lib/libretro/genesis_plus_gx_wide_libretro.so
+  - geolith: /usr/lib/libretro/geolith_libretro.so
+  - gme: /usr/lib/libretro/gme_libretro.so
+  - gpsp: /usr/lib/libretro/gpsp_libretro.so
+  - gw: /usr/lib/libretro/gw_libretro.so
+  - handy: /usr/lib/libretro/handy_libretro.so
+  - hatari: /usr/lib/libretro/hatari_libretro.so
+  - mame2003_plus: /usr/lib/libretro/mame2003_plus_libretro.so
+  - mame2010: /usr/lib/libretro/mame2010_libretro.so
+  - mame: /usr/lib/libretro/mame_libretro.so
+  - mednafen_lynx: /usr/lib/libretro/mednafen_lynx_libretro.so
+  - mednafen_ngp: /usr/lib/libretro/mednafen_ngp_libretro.so
+  - mednafen_pce_fast: /usr/lib/libretro/mednafen_pce_fast_libretro.so
+  - mednafen_pcfx: /usr/lib/libretro/mednafen_pcfx_libretro.so
+  - mednafen_saturn: /usr/lib/libretro/mednafen_saturn_libretro.so
+  - mednafen_supafaust: /usr/lib/libretro/mednafen_supafaust_libretro.so
+  - mednafen_supergrafx: /usr/lib/libretro/mednafen_supergrafx_libretro.so
+  - mednafen_vb: /usr/lib/libretro/mednafen_vb_libretro.so
+  - mednafen_wswan: /usr/lib/libretro/mednafen_wswan_libretro.so
+  - mesen-s: /usr/lib/libretro/mesen-s_libretro.so
+  - mesen: /usr/lib/libretro/mesen_libretro.so
+  - mgba: /usr/lib/libretro/mgba_libretro.so
+  - mrboom: /usr/lib/libretro/mrboom_libretro.so
+  - mupen64plus_32b: /usr/lib/libretro/mupen64plus_32b_libretro.so
+  - mupen64plus_next_alt: /usr/lib/libretro/mupen64plus_next_alt_libretro.so
+  - mupen64plus_next: /usr/lib/libretro/mupen64plus_next_libretro.so
+  - nekop2: /usr/lib/libretro/nekop2_libretro.so
+  - neocd: /usr/lib/libretro/neocd_libretro.so
+  - nestopiacv: /usr/lib/libretro/nestopiaCV_libretro.so
+  - nestopia: /usr/lib/libretro/nestopia_libretro.so
+  - np2kai: /usr/lib/libretro/np2kai_libretro.so
+  - nxengine: /usr/lib/libretro/nxengine_libretro.so
+  - o2em: /usr/lib/libretro/o2em_libretro.so
+  - opera: /usr/lib/libretro/opera_libretro.so
+  - parallel_n64_32b: /usr/lib/libretro/parallel_n64_32b_libretro.so
+  - pcsx_rearmed_32b: /usr/lib/libretro/pcsx_rearmed_32b_libretro.so
+  - pcsx_rearmed: /usr/lib/libretro/pcsx_rearmed_libretro.so
+  - picodrive: /usr/lib/libretro/picodrive_libretro.so
+  - pocketcdg: /usr/lib/libretro/pocketcdg_libretro.so
+  - pokemini: /usr/lib/libretro/pokemini_libretro.so
+  - potator: /usr/lib/libretro/potator_libretro.so
+  - prboom: /usr/lib/libretro/prboom_libretro.so
+  - prosystem: /usr/lib/libretro/prosystem_libretro.so
+  - puae2021: /usr/lib/libretro/puae2021_libretro.so
+  - puae: /usr/lib/libretro/puae_libretro.so
+  - px68k: /usr/lib/libretro/px68k_libretro.so
+  - quasi88: /usr/lib/libretro/quasi88_libretro.so
+  - reminiscence: /usr/lib/libretro/reminiscence_libretro.so
+  - same_cdi: /usr/lib/libretro/same_cdi_libretro.so
+  - sameboy: /usr/lib/libretro/sameboy_libretro.so
+  - sameduck: /usr/lib/libretro/sameduck_libretro.so
+  - scummvm: /usr/lib/libretro/scummvm_libretro.so
+  - snes9x2002: /usr/lib/libretro/snes9x2002_libretro.so
+  - snes9x2005_plus: /usr/lib/libretro/snes9x2005_plus_libretro.so
+  - snes9x2010: /usr/lib/libretro/snes9x2010_libretro.so
+  - snes9x: /usr/lib/libretro/snes9x_libretro.so
+  - spring_pcsx_rearmed32: /usr/lib/libretro/spring_pcsx_rearmed32_libretro.so
+  - spring_ppsspp: /usr/lib/libretro/spring_ppsspp_libretro.so
+  - spring_shell: /usr/lib/libretro/spring_shell_libretro.so
+  - stella: /usr/lib/libretro/stella_libretro.so
+  - swanstation: /usr/lib/libretro/swanstation_libretro.so
+  - tgbdual: /usr/lib/libretro/tgbdual_libretro.so
+  - tic80: /usr/lib/libretro/tic80_libretro.so
+  - tyrquake: /usr/lib/libretro/tyrquake_libretro.so
+  - uae4arm_32b: /usr/lib/libretro/uae4arm_32b_libretro.so
+  - uzem: /usr/lib/libretro/uzem_libretro.so
+  - vba_next: /usr/lib/libretro/vba_next_libretro.so
+  - vbam: /usr/lib/libretro/vbam_libretro.so
+  - vecx: /usr/lib/libretro/vecx_libretro.so
+  - vice_x128: /usr/lib/libretro/vice_x128_libretro.so
+  - vice_x64: /usr/lib/libretro/vice_x64_libretro.so
+  - vice_x64dtv: /usr/lib/libretro/vice_x64dtv_libretro.so
+  - vice_x64sc: /usr/lib/libretro/vice_x64sc_libretro.so
+  - vice_xcbm2: /usr/lib/libretro/vice_xcbm2_libretro.so
+  - vice_xcbm5x0: /usr/lib/libretro/vice_xcbm5x0_libretro.so
+  - vice_xpet: /usr/lib/libretro/vice_xpet_libretro.so
+  - vice_xplus4: /usr/lib/libretro/vice_xplus4_libretro.so
+  - vice_xscpu64: /usr/lib/libretro/vice_xscpu64_libretro.so
+  - vice_xvic: /usr/lib/libretro/vice_xvic_libretro.so
+  - virtualjaguar: /usr/lib/libretro/virtualjaguar_libretro.so
+  - x1: /usr/lib/libretro/x1_libretro.so
+  - xrick: /usr/lib/libretro/xrick_libretro.so
+  - yabasanshiro: /usr/lib/libretro/yabasanshiro_libretro.so
+
+[+] Direktori ROM Dipindai (6):
+  - /storage/online_netplay/roms
+  - /storage/roms/mame
+  - /storage/roms/fbneo
+  - /storage/roms/arcade
+  - /storage/roms/snes
+  - /storage/roms
+
+[+] Game Arcade Ditemukan: 9 (Siap dimainkan: 9):
+  - [READY] STREET FIGHTER II TURBO (V1.0) (E) [!] (SNES) (Street Fighter II Turbo (V1.0) (E) [!].zip) -> Core: snes9x
+  - [READY] ULTIMATE MORTAL KOMBAT 3 (1) (SNES) (Ultimate Mortal Kombat 3 (1).zip) -> Core: snes9x
+  - [READY] SUPER MARIO WORLD (U) [!] (SNES) (Super Mario World (U) [!].zip) -> Core: snes9x
+  - [READY] SF2CEUA (Arcade) (sf2ceua.zip) -> Core: fbneo
+  - [READY] DONKEY KONG COUNTRY (U) (V1.2) [!] (SNES) (Donkey Kong Country (U) (V1.2) [!].zip) -> Core: snes9x
+  - [READY] HSF2 (Arcade) (hsf2.zip) -> Core: fbneo
+  - [READY] Marvel vs. Capcom: Clash of Super Heroes (mvsc.zip) -> Core: fbneo
+  - [READY] MVSCUR1 (Arcade) (mvscur1.zip) -> Core: fbneo
+  - [READY] SUPER MARIO ALL-STARS + SUPER MARIO WORLD (SNES) (Super Mario All-Stars + Super Mario World.zip) -> Core: snes9x
