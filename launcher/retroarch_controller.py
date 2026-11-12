@@ -21,7 +21,7 @@ logger = logging.getLogger("Arcade.RetroArch")
 @dataclass
 class RetroArchLaunchConfig:
     """Configuration parameters for launching a RetroArch Netplay session."""
-    mode: str                       # 'host' or 'client'
+    mode: str                       # 'host', 'client', or 'offline'
     core_path: str                  # Absolute path to libretro core (.so / .dylib)
     rom_path: str                   # Absolute path to ROM file
     port: int = 55435               # Netplay port
@@ -75,6 +75,27 @@ class RetroArchController:
 
     def create_session_config(self, config: RetroArchLaunchConfig) -> str:
         """Create an isolated temporary append-config file for the Netplay session."""
+        if config.mode == "offline":
+            lines = [
+                "# Auto-generated Arcade Offline temporary session config",
+                "# Automatically removed upon session exit",
+            ]
+            if config.fullscreen:
+                lines.append('video_fullscreen = "true"')
+            else:
+                lines.append('video_fullscreen = "false"')
+
+            fd, temp_path = tempfile.mkstemp(
+                prefix=f"arcade_offline_{config.session_id}_",
+                suffix=".cfg"
+            )
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
+
+            self.temp_config_paths.add(temp_path)
+            logger.debug(f"File config offline sementara dibuat: {temp_path}")
+            return temp_path
+
         mode_val = "false" if config.mode == "host" else "true"
         lines = [
             "# Auto-generated Arcade Netplay temporary session config",
@@ -132,24 +153,33 @@ class RetroArchController:
                 pass
         binary = binary or "retroarch"
 
-        cmd = [
-            binary,
-            "-v",
-            "-L", config.core_path,
-            config.rom_path,
-            "--port", str(config.port),
-            "--nick", config.nickname,
-            "--appendconfig", temp_cfg_path,
-        ]
-
-        if config.mode == "host":
-            cmd.append("--host")
-        elif config.mode == "client":
-            if not config.connect_ip:
-                raise ValueError("connect_ip must be provided for client mode")
-            cmd.extend(["--connect", config.connect_ip])
+        if config.mode == "offline":
+            cmd = [
+                binary,
+                "-v",
+                "-L", config.core_path,
+                config.rom_path,
+                "--appendconfig", temp_cfg_path,
+            ]
         else:
-            raise ValueError(f"Unknown launch mode: {config.mode}")
+            cmd = [
+                binary,
+                "-v",
+                "-L", config.core_path,
+                config.rom_path,
+                "--port", str(config.port),
+                "--nick", config.nickname,
+                "--appendconfig", temp_cfg_path,
+            ]
+
+            if config.mode == "host":
+                cmd.append("--host")
+            elif config.mode == "client":
+                if not config.connect_ip:
+                    raise ValueError("connect_ip must be provided for client mode")
+                cmd.extend(["--connect", config.connect_ip])
+            else:
+                raise ValueError(f"Unknown launch mode: {config.mode}")
 
         if config.extra_args:
             cmd.extend(config.extra_args)

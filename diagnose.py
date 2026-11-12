@@ -2,7 +2,7 @@
 
 Runs a complete 5-point system check:
 1. RetroArch installation & executable path
-2. Libretro arcade cores (MAME, FBNeo)
+2. Libretro arcade cores (MAME, FBNeo), including core version/fingerprint
 3. ROM directories & detected arcade games
 4. Matchmaking server reachability & ping
 5. Netplay network port availability (55435, 55436)
@@ -15,6 +15,8 @@ import subprocess
 import json
 import urllib.request
 import urllib.error
+import hashlib
+import glob
 
 from catalog.validator import find_retroarch_binary
 from catalog.scanner import SystemScanner
@@ -56,6 +58,41 @@ def check_port(port: int) -> bool:
         return False
 
 
+def read_core_metadata(core_path: str):
+    """Read Libretro core name/version from its matching .info file."""
+    core_dir = os.path.dirname(core_path)
+    core_stem = os.path.splitext(os.path.basename(core_path))[0]
+    candidates = [os.path.join(core_dir, core_stem + ".info")]
+    # Some installations keep .info files in a separate info directory.
+    for directory in (
+        os.path.join(core_dir, "..", "info"),
+        os.path.expanduser("~/Library/Application Support/RetroArch/info"),
+        os.path.expanduser("~/.config/retroarch/info"),
+        "/storage/.config/retroarch/cores/info",
+    ):
+        candidates.extend(glob.glob(os.path.join(directory, core_stem + ".info")))
+
+    for path in candidates:
+        try:
+            with open(path, "r", encoding="utf-8") as info_file:
+                info = json.load(info_file)
+            version = info.get("library_version")
+            name = info.get("display_name") or info.get("corename") or info.get("library_name")
+            if version or name:
+                return name or "Unknown", version or "not declared", path
+        except (OSError, ValueError, TypeError):
+            continue
+    return None
+
+
+def sha256_file(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as core_file:
+        for chunk in iter(lambda: core_file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def run_diagnostics(server_url: str = "http://localhost:8080"):
     if sys.platform == "win32":
         os.system("")  # Enable ANSI color escape codes on Windows CMD/PowerShell
@@ -91,7 +128,18 @@ def run_diagnostics(server_url: str = "http://localhost:8080"):
     if cores:
         print_ok(f"Ditemukan total {len(cores)} core libretro:")
         for c in arcade_cores:
-            print(f"      - [Arcade] {c}: {cores[c]}")
+            metadata = read_core_metadata(cores[c])
+            if metadata:
+                core_title, core_version, info_path = metadata
+                print(f"      - [Arcade] {c}: {core_title} {core_version} ({cores[c]})")
+                print(f"        Core info: {info_path}")
+            else:
+                print(f"      - [Arcade] {c}: versi tidak ditemukan di file .info ({cores[c]})")
+                print_warn(f"Versi {c} tidak bisa dibaca; bandingkan core yang dipakai di kedua perangkat.")
+            try:
+                print(f"        SHA-256 binary: {sha256_file(cores[c])}")
+            except OSError as e:
+                print_warn(f"Tidak dapat menghitung sidik jari core {c}: {e}")
         for c in other_cores:
             print(f"      - [Console] {c}: {cores[c]}")
     else:
@@ -169,8 +217,12 @@ if __name__ == "__main__":
     else:
         try:
             with open("config.json", "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-                url = cfg.get("server", {}).get("url")
+                content = f.read()
+            import re
+            pattern = re.compile(r"(?:/\*.*?\*/|//[^\r\n]*|#[^\r\n]*)|(\"(?:\\.|[^\"\\])*\")", re.DOTALL)
+            clean_json = pattern.sub(lambda m: m.group(1) if m.group(1) is not None else "", content)
+            cfg = json.loads(clean_json)
+            url = cfg.get("server", {}).get("url")
         except Exception:
             pass
     url = url or "http://localhost:8080"

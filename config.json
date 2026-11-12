@@ -1,24 +1,45 @@
 {
+  // Versi format konfigurasi launcher
   "version": "1.0",
+  // Pengaturan Matchmaking & Relay Server
   "server": {
+    // Alamat IP / Host dan Port dari server matchmaking & relay online
     "url": "http://217.216.146.15:8080",
+    // Batas waktu maksimal (detik) saat menghubungi server API
     "timeout_seconds": 8.0,
+    // Interval waktu (detik) pengiriman sinyal detak jantung/aktif ke server
     "heartbeat_interval_seconds": 5.0
   },
+  // Pengaturan identitas pemain & negosiasi jaringan
   "client": {
+    // Nama panggilan / nickname kabinet atau pemain yang tampil di room
     "player_name": "ArcadeCab1",
+    // Batas waktu (detik) uji coba koneksi langsung P2P lokal via LAN/WiFi
     "direct_connection_timeout": 3.0,
+    // Batas waktu total (detik) untuk keseluruhan proses negosiasi koneksi
     "overall_connection_timeout": 20.0
   },
+  // Pengaturan RetroArch, Core, ROM, dan Netplay
   "retroarch": {
+    // Lokasi binary RetroArch (null = deteksi otomatis oleh sistem)
     "binary_path": null,
+    // Folder khusus core libretro (null = gunakan folder bawaan sistem)
     "custom_cores_dir": null,
+    // Folder penyimpanan file ROM arcade (.zip)
     "custom_roms_dir": "roms",
+    // true = hanya memindai folder roms lokal (jauh lebih cepat, abaikan disk luar)
+    "scan_local_roms_only": true,
+    // true = buka game dalam layar penuh (fullscreen), false = windowed
     "fullscreen": true,
+    // Frekuensi cek sinkronisasi Netplay dalam frame (30 = tiap 0.5 detik di 60 FPS)
     "check_frames": 30,
-    "input_latency_frames": 2,
-    "stateless_mode": false,
+    // Buffer input kontroler dalam frame (3 frame = ~50ms, anti lag spike/DC)
+    "input_latency_frames": 3,
+    // true = mode lockstep (kebal crash savestate antar OS), false = rollback
+    "stateless_mode": true,
+    // true = sinkronkan save RAM dari host, false = mulai dari RAM bersih
     "sync_sram": false,
-    "preferred_arcade_core": "fbneo"
+    // Core arcade prioritas utama (fbneo = FinalBurn Neo, terbaik untuk arcade netplay)
+    "preferred_arcade_core": "snes"
   }
 }

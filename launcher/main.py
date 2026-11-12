@@ -11,6 +11,8 @@ Primary entrypoint executing the complete workflow:
 
 import os
 import sys
+import json
+import re
 import time
 import argparse
 import logging
@@ -366,6 +368,39 @@ class ArcadeLauncherApp:
             print(f"\n[!] Gagal menjalankan game: {res.error_message}")
         print(f"Permainan selesai. Status: {res.status}")
 
+    def run_cli_play_offline(self, game_id: str) -> None:
+        """Launch a game directly in offline RetroArch via CLI."""
+        ArcadeCLI.show_banner()
+        game = self.manifest.get_game(game_id)
+        if not game:
+            print(f"Error: Game '{game_id}' tidak ditemukan di katalog.")
+            return
+
+        print(f"Memeriksa aset lokal untuk {game['display_name']}...")
+        valid, code, details = self.validator.verify_local_game(game_id, strict_hash=not self.dry_run)
+        if not valid and not self.dry_run:
+            print(f"Error [{code}]: {details.get('message')}")
+            return
+
+        core_path = details.get("core_lib") if details else game.get("core_path")
+        rom_path = details.get("rom_path") if details else game.get("scanned_rom_path")
+        ra_bin = details.get("retroarch_bin") or self.ra_controller.retroarch_bin
+
+        launch_cfg = RetroArchLaunchConfig(
+            mode="offline",
+            core_path=core_path,
+            rom_path=rom_path,
+            session_id=game_id,
+            retroarch_bin=ra_bin,
+            fullscreen=self.fullscreen,
+        )
+
+        print(f"\nMembuka {game.get('display_name')} di RetroArch (Offline)...")
+        res = self.ra_controller.launch(launch_cfg, dry_run=self.dry_run)
+        if res.status in ("FAILED", "CRASHED"):
+            print(f"\n[!] Gagal menjalankan game: {res.error_message}")
+        print(f"Permainan selesai. Status: {res.status}")
+
     def run_interactive(self) -> None:
         """Run the interactive Arcade Curses frontend, or interactive CLI on platforms without curses."""
         if not self.ui.init_curses():
@@ -388,10 +423,10 @@ class ArcadeLauncherApp:
 
         while True:
             print("\n================= MENU UTAMA =================")
-            print(" 1. Buat Room (Host Permainan)")
-            print(" 2. Cari & Gabung Room (Client)")
-            print(" 3. Pindai Ulang Core & ROM (Rescan)")
-            print(" 4. Lihat Log Sistem")
+            print(" 1. Main Offline (Single / Local Player)")
+            print(" 2. Buat Room Online (Host Permainan)")
+            print(" 3. Cari & Gabung Room Online (Client)")
+            print(" 4. Pindai ROM (Rescan)")
             print(" 5. Keluar")
             print("==============================================")
             try:
@@ -405,7 +440,26 @@ class ArcadeLauncherApp:
                 ready = [g for g in games if g.get("status") == "ready"]
                 if not ready:
                     print("\n[!] Belum ada ROM yang siap dimainkan.")
-                    print("    Letakkan file ROM arcade (.zip) di folder ROM Anda, lalu pilih menu 3 (Rescan).")
+                    print("    Letakkan file ROM arcade (.zip) di folder ROM Anda, lalu pilih menu 4 (Pindai).")
+                    continue
+
+                print("\nPilih Game untuk Main Offline:")
+                for i, g in enumerate(ready, 1):
+                    print(f"  {i}. {g.get('display_name')} ({g.get('rom_file')}) -> Core: {g.get('retroarch_core')}")
+                try:
+                    g_choice = input(f"Pilih game [1-{len(ready)}] (Enter untuk 1): ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    continue
+                idx = int(g_choice) - 1 if g_choice.isdigit() and 1 <= int(g_choice) <= len(ready) else 0
+                selected_game = ready[idx]
+                self.run_cli_play_offline(selected_game["game_id"])
+
+            elif choice == "2":
+                games = self.manifest.list_games()
+                ready = [g for g in games if g.get("status") == "ready"]
+                if not ready:
+                    print("\n[!] Belum ada ROM yang siap dimainkan.")
+                    print("    Letakkan file ROM arcade (.zip) di folder ROM Anda, lalu pilih menu 4 (Pindai).")
                     continue
 
                 print("\nPilih Game untuk Host:")
@@ -424,7 +478,7 @@ class ArcadeLauncherApp:
                 r_name = r_name or f"Room {self.player_name}"
                 self.run_cli_create(selected_game["game_id"], r_name)
 
-            elif choice == "2":
+            elif choice == "3":
                 print("\nMencari room online di server...")
                 rooms = self.api.list_rooms()
                 if not rooms:
@@ -446,11 +500,8 @@ class ArcadeLauncherApp:
                     target_room_id = r_choice
                 self.run_cli_join(target_room_id)
 
-            elif choice == "3":
-                self.run_cli_scan()
-
             elif choice == "4":
-                self.run_show_logs()
+                self.run_cli_scan()
 
             elif choice == "5" or choice.lower() in ("q", "exit"):
                 print("Terima kasih telah bermain!")
@@ -476,10 +527,7 @@ class ArcadeLauncherApp:
                 for g in games:
                     status_icon = "✓" if g.get("status") == "ready" or g.get("scanned_rom_path") else " "
                     items.append((f"[{status_icon}] {g['display_name']}", g))
-            items.append(("🔄 PINDAI ULANG DISK / RESCAN", "rescan"))
-            scan_label = "📁 MODE SCAN: HANYA FOLDER ROMS" if self.local_roms_only else "🌐 MODE SCAN: SEMUA FOLDER SISTEM"
-            items.append((scan_label, "toggle_scan_mode"))
-            items.append(("📋 LIHAT LOG SISTEM", "view_logs"))
+            items.append(("🔄 PINDAI", "rescan"))
             return items
 
         menu_items = build_menu_items()
@@ -525,34 +573,83 @@ class ArcadeLauncherApp:
                 _, selected_data = menu_items[selected_idx]
                 if selected_data == "rescan":
                     # Trigger dynamic re-scan
-                    logger.info("Menu Utama: Memulai pemindaian ulang disk (RESCAN)...")
-                    self.ui.show_message("MEMINDAI...", "Sedang memindai direktori ROM dan core...", wait_seconds=0.5)
+                    logger.info("Menu Utama: Memulai pemindaian ROM...")
+                    self.ui.show_message("MEMINDAI...", "Sedang memindai direktori ROM...", wait_seconds=0.5)
                     self.manifest.scan_and_merge(self.scanner)
                     menu_items = build_menu_items()
                     games_count = len(self.manifest.list_games())
                     logger.info(f"Menu Utama: Pemindaian selesai. Total game terdaftar: {games_count}")
                     self.ui.show_message("SELESAI", f"Ditemukan {games_count} game arcade!", wait_seconds=1.5)
-                elif selected_data == "toggle_scan_mode":
-                    self.local_roms_only = not self.local_roms_only
-                    self.scanner.local_roms_only = self.local_roms_only
-                    self.validator.local_roms_only = self.local_roms_only
-                    mode_str = "Hanya Folder ROMs Lokal (roms/)" if self.local_roms_only else "Semua Folder Sistem & Eksternal"
-                    logger.info(f"Menu Utama: Mode scan diubah menjadi [{mode_str}]")
-                    self.ui.show_message("MODE SCAN DIUBAH", f"Mode scan aktif:\n{mode_str}\n\nMemindai ulang...", wait_seconds=1.0)
-                    self.manifest.scan_and_merge(self.scanner)
-                    menu_items = build_menu_items()
                 elif selected_data == "empty_hint":
                     logger.info("Menu Utama: Petunjuk penempatan ROM ditampilkan.")
-                    self.ui.show_message("PETUNJUK", "Letakkan file ROM (.zip) di folder roms, lalu pilih RESCAN.", wait_seconds=2.5)
-                elif selected_data == "view_logs":
-                    logger.info("Menu Utama: Membuka layar penampil log sistem.")
-                    self.ui.show_log_viewer(get_recent_logs)
+                    self.ui.show_message("PETUNJUK", "Letakkan file ROM (.zip) di folder roms, lalu pilih PINDAI.", wait_seconds=2.5)
                 elif isinstance(selected_data, dict):
                     logger.info(f"Menu Utama: Pengguna memilih game '{selected_data.get('display_name')}' ({selected_data.get('game_id')})")
                     self._game_action_loop(selected_data)
 
     def _game_action_loop(self, game: Dict[str, Any]) -> None:
-        """Layar 2: Cari Room / Buat Room."""
+        """Layar 2: Pilih Mode Permainan (Offline / Online)."""
+        options = [
+            ("🕹️  MAIN OFFLINE", "offline"),
+            ("🌐 MAIN ONLINE", "online"),
+            ("⬅️  KEMBALI", "back"),
+        ]
+        selected_idx = 0
+        needs_redraw = True
+        last_render_time = 0.0
+
+        # Prime room cache asynchronously in background
+        self.api.get_cached_rooms(game["game_id"])
+
+        while True:
+            # Refresh online players count non-blocking
+            rooms = self.api.get_cached_rooms(game["game_id"], max_age=3.0)
+
+            now = time.time()
+            if needs_redraw or (now - last_render_time >= 1.0):
+                lines = [
+                    f"Game: {game['display_name']}",
+                    "",
+                    "PILIH MODE PERMAINAN:"
+                ]
+                for idx, (label, _) in enumerate(options):
+                    prefix = "> [ " if idx == selected_idx else "  [ "
+                    lines.append(f"{prefix}{label} ]")
+
+                lines.append("")
+                lines.append(f"Room Online Aktif: {len(rooms)}")
+
+                self.ui.draw_box(
+                    game["display_name"],
+                    lines,
+                    "UP/DOWN: Pilih | ENTER: Lanjut | ESC: Kembali"
+                )
+                last_render_time = now
+                needs_redraw = False
+
+            key = self.ui.get_key()
+            if self.ui.is_back(key):
+                break
+            elif self.ui.is_up(key):
+                selected_idx = (selected_idx - 1) % len(options)
+                needs_redraw = True
+            elif self.ui.is_down(key):
+                selected_idx = (selected_idx + 1) % len(options)
+                needs_redraw = True
+            elif self.ui.is_enter(key):
+                needs_redraw = True
+                _, choice = options[selected_idx]
+                if choice == "offline":
+                    logger.info(f"Menu Mode: Memilih MAIN OFFLINE untuk '{game.get('display_name')}'")
+                    self._launch_offline(game)
+                elif choice == "online":
+                    logger.info(f"Menu Mode: Memilih MAIN ONLINE untuk '{game.get('display_name')}'")
+                    self._online_mode_loop(game)
+                elif choice == "back":
+                    break
+
+    def _online_mode_loop(self, game: Dict[str, Any]) -> None:
+        """Layar 2b: Pilihan Online (Cari Room / Buat Room)."""
         actions = ["CARI ROOM", "BUAT ROOM", "KEMBALI"]
         selected_idx = 0
         needs_redraw = True
@@ -569,6 +666,7 @@ class ArcadeLauncherApp:
             if needs_redraw or (now - last_render_time >= 1.0):
                 lines = [
                     f"Game: {game['display_name']}",
+                    "Mode: ONLINE MULTIPLAYER",
                     "",
                     "PILIHAN MENU:"
                 ]
@@ -580,7 +678,7 @@ class ArcadeLauncherApp:
                 lines.append(f"Room Aktif: {len(rooms)}")
 
                 self.ui.draw_box(
-                    game["display_name"],
+                    f"{game['display_name']} [ONLINE]",
                     lines,
                     "UP/DOWN: Pilih | ENTER: Buka | ESC: Kembali"
                 )
@@ -599,7 +697,7 @@ class ArcadeLauncherApp:
             elif self.ui.is_enter(key):
                 needs_redraw = True
                 action = actions[selected_idx]
-                logger.info(f"Menu Aksi Game '{game.get('display_name')}': Memilih [{action}]")
+                logger.info(f"Menu Aksi Online '{game.get('display_name')}': Memilih [{action}]")
                 if action in ("CARI ROOM", "BUAT ROOM"):
                     online, _ = self.api.get_cached_health(max_age=3.0)
                     if not online:
@@ -619,6 +717,53 @@ class ArcadeLauncherApp:
                     self._create_room_flow(game)
                 elif action == "KEMBALI":
                     break
+
+    def _launch_offline(self, game: Dict[str, Any]) -> None:
+        """Jalankan game secara lokal / offline di RetroArch biasa."""
+        game_id = game["game_id"]
+        logger.info(f"Menu Mode: Mempersiapkan peluncuran OFFLINE game '{game.get('display_name')}' ({game_id})")
+
+        self.ui.show_message("MEMERIKSA GAME", f"Memeriksa aset game {game.get('display_name')}...", wait_seconds=0.3)
+        valid, code, details = self.validator.verify_local_game(game_id, strict_hash=not self.dry_run)
+        if not valid and not self.dry_run:
+            logger.error(f"Validasi game offline gagal: {code} - {details.get('message')}")
+            self.ui.show_message("ASET TIDAK LENGKAP", details.get("message", "Game tidak siap dimainkan."), wait_seconds=3.0)
+            return
+
+        core_path = details.get("core_lib") if details else game.get("core_path")
+        rom_path = details.get("rom_path") if details else game.get("scanned_rom_path")
+        ra_bin = details.get("retroarch_bin") or self.ra_controller.retroarch_bin
+
+        if not core_path or not rom_path:
+            self.ui.show_message("ASET TIDAK LENGKAP", "Core atau file ROM tidak ditemukan.", wait_seconds=3.0)
+            return
+
+        if ra_bin:
+            self.ra_controller.retroarch_bin = ra_bin
+
+        launch_cfg = RetroArchLaunchConfig(
+            mode="offline",
+            core_path=core_path,
+            rom_path=rom_path,
+            session_id=game_id,
+            retroarch_bin=ra_bin,
+            fullscreen=self.fullscreen,
+        )
+
+        logger.info(f"Meluncurkan RetroArch Offline untuk game: {game.get('display_name')}")
+        self.ui.show_message("MEMBUKA GAME...", f"Membuka {game.get('display_name')} di RetroArch...", wait_seconds=0.5)
+        self.ui.pause_gamepad()
+        try:
+            res = self.ra_controller.launch(launch_cfg, dry_run=self.dry_run)
+        finally:
+            self.ui.resume_gamepad()
+            self.ui.init_curses()
+
+        if res.status == "MOCK_SUCCESS":
+            self.ui.show_message("SIMULASI BERHASIL", "Mode simulasi aktif! Game offline selesai dimainkan.", wait_seconds=2.0)
+        elif res.exit_code != 0 or res.status in ("FAILED", "CRASHED"):
+            err_text = res.error_message or f"Kode keluar: {res.exit_code}"
+            self.ui.show_message("RETROARCH GAGAL DIBUKA", f"Gagal menjalankan game:\n{err_text[:250]}", wait_seconds=4.0)
 
     def _browse_rooms_loop(self, game: Dict[str, Any]) -> None:
         """Layar 3: Cari dan Gabung ke Room."""
@@ -957,9 +1102,15 @@ def main() -> None:
                         help="Game ID for room creation (default: sf2)")
     parser.add_argument("--room-name", help="Custom room name")
     parser.add_argument("--join", help="Join room by Room ID via CLI")
+    parser.add_argument("--play", "--offline", dest="play_offline", metavar="GAME_ID",
+                        help="Launch a game directly in offline/local RetroArch mode")
     parser.add_argument("--check-frames", type=int, help="Netplay sync check interval in frames (e.g. 30)")
     parser.add_argument("--input-latency", type=int, help="Netplay input delay buffer in frames (e.g. 2)")
     parser.add_argument("--stateless", action="store_true", default=None, help="Force stateless/lockstep mode")
+    parser.add_argument("--local-roms-only", action="store_true", default=None,
+                        help="Only scan the single project 'roms' folder (exclude system directories)")
+    parser.add_argument("--all-rom-dirs", action="store_true",
+                        help="Scan all system ROM directories across internal and external disks")
 
     args = parser.parse_args()
 
@@ -988,14 +1139,18 @@ def main() -> None:
         print("============================================\n")
         return
 
-    # Load defaults from config.json if present
+    # Load defaults from config.json if present (supports // and # comments)
     cfg = {}
     if os.path.isfile(args.config):
         try:
             with open(args.config, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-        except Exception:
-            pass
+                content = f.read()
+            import re
+            pattern = re.compile(r"(?:/\*.*?\*/|//[^\r\n]*|#[^\r\n]*)|(\"(?:\\.|[^\"\\])*\")", re.DOTALL)
+            clean_json = pattern.sub(lambda m: m.group(1) if m.group(1) is not None else "", content)
+            cfg = json.loads(clean_json)
+        except Exception as e:
+            logger.warning(f"Peringatan saat memuat konfigurasi {args.config}: {e}")
 
     server_url = (
         args.server
@@ -1053,6 +1208,12 @@ def main() -> None:
     pref_arcade = cfg.get("retroarch", {}).get("preferred_arcade_core")
     pref_cores = [pref_arcade] if pref_arcade else None
 
+    local_roms_only = cfg.get("retroarch", {}).get("scan_local_roms_only", True)
+    if args.local_roms_only is not None:
+        local_roms_only = args.local_roms_only
+    if args.all_rom_dirs:
+        local_roms_only = False
+
     app = ArcadeLauncherApp(
         server_url=server_url,
         retroarch_bin=ra_bin,
@@ -1064,10 +1225,13 @@ def main() -> None:
         input_latency_frames=input_latency,
         stateless_mode=stateless,
         sync_sram=sync_sram,
-        preferred_arcade_cores=pref_cores
+        preferred_arcade_cores=pref_cores,
+        local_roms_only=local_roms_only
     )
 
-    if args.scan:
+    if args.play_offline:
+        app.run_cli_play_offline(args.play_offline)
+    elif args.scan:
         app.run_cli_scan()
     elif args.list:
         app.run_cli_list(args.game)
