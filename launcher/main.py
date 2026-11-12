@@ -47,7 +47,9 @@ class ArcadeLauncherApp:
                  stateless_mode: bool = False,
                  sync_sram: bool = True,
                  preferred_arcade_cores: Optional[List[str]] = None,
-                 local_roms_only: bool = False):
+                 local_roms_only: bool = False,
+                 log_file: str = "arcade_launcher.log",
+                 log_uploader_cfg: Optional[Dict[str, Any]] = None):
         self.server_url = server_url
         self.player_name = player_name
         self.dry_run = dry_run
@@ -60,6 +62,21 @@ class ArcadeLauncherApp:
         self.custom_core_dirs = custom_core_dirs or []
         self.preferred_arcade_cores = preferred_arcade_cores
         self.local_roms_only = local_roms_only
+        self.log_file = log_file
+
+        from launcher.log_uploader import RemoteLogUploader
+        lu_cfg = log_uploader_cfg or {}
+        self.log_uploader = RemoteLogUploader(
+            host=lu_cfg.get("remote_host", "217.216.146.15"),
+            port=lu_cfg.get("remote_port", 20157),
+            user=lu_cfg.get("remote_user", "root"),
+            remote_dir=lu_cfg.get("remote_path", "/root/log_testing"),
+            machine_name=self.player_name,
+            log_file=self.log_file,
+            ssh_key_path=lu_cfg.get("ssh_key_path"),
+            timeout_seconds=lu_cfg.get("upload_timeout_seconds", 8.0),
+            enabled=lu_cfg.get("auto_upload", True)
+        )
 
         from catalog.scanner import SystemScanner
         self.scanner = SystemScanner(
@@ -85,12 +102,48 @@ class ArcadeLauncherApp:
         self.ra_controller = RetroArchController(retroarch_bin=self.retroarch_bin)
         self.ui = ArcadeTUI()
 
-        logger.info(
-            f"Arcade Online Launcher siap. Server: {self.server_url} | "
-            f"Pemain: {self.player_name} | RetroArch: {self.retroarch_bin} | "
-            f"Tampilan: {'Fullscreen' if self.fullscreen else 'Windowed'}"
+        import socket
+        import platform
+        from launcher.system_info import (
+            LAUNCHER_VERSION,
+            get_machine_hardware,
+            get_os_distro,
+            get_retroarch_version_string,
         )
-        logger.info(f"Katalog game: {len(self.manifest.list_games())} judul game terdaftar.")
+        from launcher.connection_manager import get_local_ip, get_all_local_ips
+
+        hostname = socket.gethostname()
+        distro = get_os_distro()
+        hardware = get_machine_hardware()
+        local_ip = get_local_ip()
+        candidate_ips = get_all_local_ips()
+        ra_ver = get_retroarch_version_string(self.retroarch_bin)
+        lat_ms = int(round(self.input_latency_frames * (1000.0 / 60.0)))
+
+        logger.info("=" * 78)
+        logger.info(f"ARCADE ONLINE NETPLAY LAUNCHER v{LAUNCHER_VERSION}")
+        logger.info(f"  -> Identitas Mesin : {self.player_name} (Hostname: {hostname})")
+        logger.info(f"  -> Hardware / OS   : {distro} | {hardware} ({platform.machine()})")
+        logger.info(f"  -> IP Jaringan     : {local_ip} (Kandidat: {candidate_ips})")
+        logger.info(f"  -> Emulator        : {self.retroarch_bin} [{ra_ver}]")
+        logger.info(f"  -> Server Relay    : {self.server_url}")
+        logger.info(
+            f"  -> Konfig Netplay  : Buffer={self.input_latency_frames} frame (~{lat_ms}ms) | "
+            f"CheckFrames={self.check_frames} | Stateless={'Aktif' if self.stateless_mode else 'Nonaktif'} | "
+            f"SyncSRAM={'Aktif' if self.sync_sram else 'Nonaktif'} | "
+            f"Layar={'Fullscreen' if self.fullscreen else 'Windowed'}"
+        )
+        logger.info(
+            f"  -> Upload Log VPS  : {'Aktif' if self.log_uploader.enabled else 'Nonaktif'} "
+            f"({self.log_uploader.user}@{self.log_uploader.host}:{self.log_uploader.port} -> {self.log_uploader.remote_dir})"
+        )
+        logger.info(f"  -> Katalog Game    : {len(self.manifest.list_games())} judul game terdaftar.")
+        logger.info("=" * 78)
+
+    def trigger_log_upload(self, reason: str = "session_end") -> None:
+        """Trigger non-blocking background upload of launcher logs to VPS."""
+        if hasattr(self, "log_uploader") and self.log_uploader and self.log_uploader.enabled:
+            self.log_uploader.upload_async(reason=reason)
 
 
 
@@ -261,6 +314,7 @@ class ArcadeLauncherApp:
         finally:
             print("Membersihkan sesi room...")
             self.api.close_room(room_id, host_token)
+            self.trigger_log_upload("host_session_end")
             print("Selesai.")
 
     def run_cli_join(self, room_id: str) -> None:
@@ -361,6 +415,7 @@ class ArcadeLauncherApp:
             except Exception:
                 pass
             self.api.leave_room(room_id, client_id, client_token)
+            self.trigger_log_upload("client_session_end")
 
         if supervisor.peer_disconnected:
             print(f"\n[!] Lawan terputus: {supervisor.disconnect_reason}\nPermainan diakhiri.")
@@ -400,6 +455,7 @@ class ArcadeLauncherApp:
         if res.status in ("FAILED", "CRASHED"):
             print(f"\n[!] Gagal menjalankan game: {res.error_message}")
         print(f"Permainan selesai. Status: {res.status}")
+        self.trigger_log_upload("offline_game_end")
 
     def run_interactive(self) -> None:
         """Run the interactive Arcade Curses frontend, or interactive CLI on platforms without curses."""
@@ -412,6 +468,8 @@ class ArcadeLauncherApp:
             self._main_menu_loop()
         finally:
             self.ui.restore_terminal()
+            if hasattr(self, "log_uploader") and self.log_uploader and self.log_uploader.enabled:
+                self.log_uploader.upload_sync("launcher_exit")
 
     def _run_cli_interactive_menu(self) -> None:
         """Interactive text-based menu when curses is not available (e.g. Windows without windows-curses)."""
@@ -504,6 +562,10 @@ class ArcadeLauncherApp:
                 self.run_cli_scan()
 
             elif choice == "5" or choice.lower() in ("q", "exit"):
+                if self.log_uploader.enabled:
+                    print("Mengirim log ke server VPS...")
+                    ok, msg = self.log_uploader.upload_sync("launcher_exit")
+                    print(("[✓] " if ok else "[!] Gagal kirim log: ") + msg)
                 print("Terima kasih telah bermain!")
                 break
             else:
@@ -758,6 +820,7 @@ class ArcadeLauncherApp:
         finally:
             self.ui.resume_gamepad()
             self.ui.init_curses()
+            self.trigger_log_upload("offline_game_end")
 
         if res.status == "MOCK_SUCCESS":
             self.ui.show_message("SIMULASI BERHASIL", "Mode simulasi aktif! Game offline selesai dimainkan.", wait_seconds=2.0)
@@ -842,7 +905,7 @@ class ArcadeLauncherApp:
         room_id = data["room_id"]
         host_token = data["host_token"]
         host_id = data["player_id"]
-        logger.info(f"Room berhasil dibuka! ID: {room_id} | Menunggu penantang...")
+        logger.info(f"Room berhasil dibuka! ID: {room_id} (Game: '{game['display_name']}' [{game['game_id']}] | Host: '{self.player_name}') | Menunggu penantang...")
 
         # Waiting screen
         opponent_name = None
@@ -949,6 +1012,7 @@ class ArcadeLauncherApp:
                     self.api.send_signal(room_id, host_id, "peer.left", {"reason": f"{self.player_name} keluar dari game"})
                 except Exception:
                     pass
+                self.trigger_log_upload("host_session_end")
 
             self.ui.init_curses()
             if supervisor.peer_disconnected:
@@ -991,7 +1055,7 @@ class ArcadeLauncherApp:
 
         client_id = join_data["player_id"]
         client_token = join_data["client_token"]
-        logger.info(f"Berhasil bergabung ke room! Player ID: {client_id}")
+        logger.info(f"Berhasil bergabung ke room {room['room_id']}! Player ID: {client_id} (Game: '{game['display_name']}' | Host: '{room.get('host_name', 'Player 1')}')")
 
         def update_ui_steps(steps):
             self.ui.show_connection_screen(steps)
@@ -1063,6 +1127,7 @@ class ArcadeLauncherApp:
             except Exception:
                 pass
             self.api.leave_room(room["room_id"], client_id, client_token)
+            self.trigger_log_upload("client_session_end")
             self.ui.init_curses()
 
         if supervisor.peer_disconnected:
@@ -1111,6 +1176,9 @@ def main() -> None:
                         help="Only scan the single project 'roms' folder (exclude system directories)")
     parser.add_argument("--all-rom-dirs", action="store_true",
                         help="Scan all system ROM directories across internal and external disks")
+
+    parser.add_argument("--upload-logs", action="store_true",
+                        help="Upload log file to VPS log server immediately and exit")
 
     args = parser.parse_args()
 
@@ -1226,8 +1294,15 @@ def main() -> None:
         stateless_mode=stateless,
         sync_sram=sync_sram,
         preferred_arcade_cores=pref_cores,
-        local_roms_only=local_roms_only
+        local_roms_only=local_roms_only,
+        log_file=args.log_file,
+        log_uploader_cfg=cfg.get("logging", {})
     )
+
+    if args.upload_logs:
+        ok, msg = app.log_uploader.upload_sync("manual_cli")
+        print(("[✓] " if ok else "[X] GAGAL: ") + msg)
+        sys.exit(0 if ok else 1)
 
     if args.play_offline:
         app.run_cli_play_offline(args.play_offline)

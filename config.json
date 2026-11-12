@@ -14,8 +14,8 @@
   "client": {
     // Nama panggilan / nickname kabinet atau pemain yang tampil di room
     "player_name": "ArcadeCab1",
-    // Batas waktu (detik) uji coba koneksi langsung P2P lokal via LAN/WiFi
-    "direct_connection_timeout": 3.0,
+    // Batas waktu (detik) uji coba koneksi langsung P2P lokal via LAN/WiFi (5 detik optimal untuk WiFi)
+    "direct_connection_timeout": 5.0,
     // Batas waktu total (detik) untuk keseluruhan proses negosiasi koneksi
     "overall_connection_timeout": 20.0
   },
@@ -31,15 +31,32 @@
     "scan_local_roms_only": true,
     // true = buka game dalam layar penuh (fullscreen), false = windowed
     "fullscreen": true,
-    // Frekuensi cek sinkronisasi Netplay dalam frame (30 = tiap 0.5 detik di 60 FPS)
-    "check_frames": 30,
-    // Buffer input kontroler dalam frame (3 frame = ~50ms, anti lag spike/DC)
-    "input_latency_frames": 3,
+    // Frekuensi cek sinkronisasi Netplay dalam frame (600 = tiap ~10 detik di 60 FPS, ramah WiFi)
+    "check_frames": 600,
+    // Buffer input kontroler dalam frame (5 frame = ~83ms, meredam jitter/lonjakan lag WiFi)
+    "input_latency_frames": 5,
     // true = mode lockstep (kebal crash savestate antar OS), false = rollback
     "stateless_mode": true,
     // true = sinkronkan save RAM dari host, false = mulai dari RAM bersih
     "sync_sram": false,
     // Core arcade prioritas utama (fbneo = FinalBurn Neo, terbaik untuk arcade netplay)
-    "preferred_arcade_core": "snes"
+    "preferred_arcade_core": "fbneo"
+  },
+  // Pengaturan Otomatis Pengiriman Log ke Server VPS
+  "logging": {
+    // Aktifkan pengiriman log otomatis ke server VPS saat sesi game selesai atau launcher ditutup
+    "auto_upload": true,
+    // Alamat IP atau hostname VPS tujuan
+    "remote_host": "217.216.146.15",
+    // Port SSH VPS tujuan
+    "remote_port": 20157,
+    // Pengguna (user) SSH VPS
+    "remote_user": "root",
+    // Folder penyimpanan file log di VPS tujuan
+    "remote_path": "/root/log_testing",
+    // Path ke file SSH private key (null = gunakan kunci SSH standar sistem ~/.ssh/id_rsa atau id_ed25519)
+    "ssh_key_path": null,
+    // Batas waktu koneksi SSH saat mengunggah log (detik)
+    "upload_timeout_seconds": 8.0
   }
 }

@@ -208,8 +208,18 @@ class RetroArchController:
         cmd = self.build_command(config, temp_cfg)
 
         start_time = time.time()
-        logger.info(f"Mempersiapkan RetroArch ({config.mode.upper()}) untuk game: {os.path.basename(config.rom_path)}")
-        logger.info(f"Perintah RetroArch: {' '.join(cmd)}")
+        mode_str = config.mode.upper()
+        lat_ms = int(round(config.input_latency_frames * (1000.0 / 60.0)))
+        logger.info(f"Mempersiapkan RetroArch ({mode_str}) untuk game: {os.path.basename(config.rom_path)}")
+        if config.mode != "offline":
+            target_str = f"Target IP: {config.connect_ip}:{config.port}" if config.mode == "client" else f"Port Listening: {config.port}"
+            logger.info(
+                f"  -> Sesi Netplay   : Mode={mode_str} | Pemain='{config.nickname}' | {target_str} | "
+                f"Buffer={config.input_latency_frames} frame (~{lat_ms}ms) | CheckFrames={config.check_frames} | "
+                f"Stateless={'Aktif' if config.stateless_mode else 'Nonaktif'}"
+            )
+        logger.info(f"  -> Core Lib       : {config.core_path}")
+        logger.info(f"  -> Perintah Exec  : {' '.join(cmd)}")
 
         if not is_mock:
             # Check executable exists before invoking subprocess

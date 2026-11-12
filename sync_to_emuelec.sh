@@ -49,16 +49,24 @@ if os.path.exists(cfg_path):
         pass
 cfg.setdefault('server', {})['url'] = 'http://217.216.146.15:8080'
 cfg.setdefault('client', {})['player_name'] = 'ArcadeCab2'
+cfg.setdefault('client', {})['direct_connection_timeout'] = 5.0
 ra = cfg.setdefault('retroarch', {})
 ra['stateless_mode'] = True
-ra['check_frames'] = 30
-ra['input_latency_frames'] = 3
+ra['check_frames'] = 600
+ra['input_latency_frames'] = 5
 ra['sync_sram'] = False
 ra['preferred_arcade_core'] = 'fbneo'
 ra['scan_local_roms_only'] = True
+lg = cfg.setdefault('logging', {})
+lg['auto_upload'] = True
+lg['remote_host'] = '217.216.146.15'
+lg['remote_port'] = 20157
+lg['remote_user'] = 'root'
+lg['remote_path'] = '/root/log_testing'
+lg['upload_timeout_seconds'] = 8.0
 with open(cfg_path, 'w') as f:
     json.dump(cfg, f, indent=2)
-print('Config EmuELEC diperbarui: Player Name = ArcadeCab2, Core = fbneo, Stateless = True, Local ROMs Only = True')
+print('Config EmuELEC diperbarui: Player Name = ArcadeCab2, Core = fbneo, CheckFrames = 600, Latency = 5, Remote Logs = ON')
 \""
 
 echo ""

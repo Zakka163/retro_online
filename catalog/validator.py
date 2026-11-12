@@ -376,7 +376,31 @@ class CatalogValidator:
             "rom_path": rom_path,
             "rom_hashes": hashes,
         }
-        logger.info(f"Validasi lokal game '{game_id}': LULUS (Binary: {ra_bin}, Core: {os.path.basename(core_lib)}, ROM: {os.path.basename(rom_path)})")
+        try:
+            from launcher.system_info import get_core_info, get_rom_file_info, get_retroarch_version_string
+            core_info = get_core_info(core_lib)
+            rom_info = get_rom_file_info(rom_path)
+            ra_ver = get_retroarch_version_string(ra_bin)
+
+            core_title = core_info.get("name", os.path.basename(core_lib))
+            core_ver = core_info.get("version", "")
+            core_desc = f"{core_title} ({core_ver})" if core_ver and core_ver != "tidak diketahui" else core_title
+            sha_short = core_info.get("sha256_short")
+            if sha_short and sha_short != "tidak tersedia":
+                core_desc += f" [SHA256:{sha_short}]"
+
+            rom_size = rom_info.get("size_str", "")
+            crc = hashes.get("crc32", "")
+            rom_desc = f"{os.path.basename(rom_path)} ({rom_size} | CRC32:{crc})"
+
+            logger.info(f"Validasi lokal game '{game_id}' ('{game.get('display_name')}'): LULUS")
+            logger.info(f"  -> ROM      : {rom_desc}")
+            logger.info(f"  -> Core     : {os.path.basename(core_lib)} -> {core_desc}")
+            logger.info(f"  -> Path Core: {core_lib}")
+            logger.info(f"  -> Emulator : {ra_bin} [{ra_ver}]")
+        except Exception:
+            logger.info(f"Validasi lokal game '{game_id}': LULUS (Binary: {ra_bin}, Core: {os.path.basename(core_lib)}, ROM: {os.path.basename(rom_path)})")
+
         return True, "OK", details
 
     def check_peer_compatibility(self, game_id: str, peer_compat: Dict[str, Any]) -> Tuple[bool, str]:
