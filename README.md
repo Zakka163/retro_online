@@ -57,7 +57,9 @@ online_netplay/
 ├── diagnose.py                  # Preflight diagnostic
 ├── sync_to_emuelec.sh           # Sinkronisasi kode + ROM ke kabinet EmuELEC
 ├── sync_replace.sh              # Mirror penuh folder proyek ke EmuELEC (hapus file lama)
-├── setup_log_ssh.sh             # Setup SSH key untuk upload log ke VPS
+├── setup_log_ssh.sh             # Setup SSH key untuk upload log ke VPS (Linux/macOS)
+├── setup_log_ssh.bat            # Setup SSH key untuk Windows (CMD / Double-click)
+├── setup_log_ssh.ps1            # Setup SSH key untuk Windows (PowerShell)
 ├── download_log.sh              # Unduh semua log dari VPS ke lokal
 └── arcade_online_launcher_spec.md
 ```
@@ -220,8 +222,15 @@ Autentikasi **hanya memakai SSH key**. Kata sandi VPS tidak disimpan di kode mau
 
 ### 1. Setup SSH key (sekali per mesin)
 
+**Linux / macOS:**
 ```bash
 ./setup_log_ssh.sh
+```
+
+**Windows:**
+Klik dua kali file `setup_log_ssh.bat` atau jalankan via PowerShell:
+```powershell
+.\setup_log_ssh.ps1
 ```
 
 Skrip ini membuat SSH key (jika belum ada), mendaftarkannya ke VPS (kata sandi VPS diminta **satu kali**), dan menguji login tanpa kata sandi.
