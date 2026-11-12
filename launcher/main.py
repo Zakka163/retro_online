@@ -1269,9 +1269,9 @@ def main() -> None:
     if cfg_core and cfg_core not in custom_cores:
         custom_cores.append(cfg_core)
 
-    check_frames = args.check_frames if args.check_frames is not None else cfg.get("retroarch", {}).get("check_frames", 600)
+    check_frames = args.check_frames if args.check_frames is not None else cfg.get("retroarch", {}).get("check_frames", 0)
     input_latency = args.input_latency if args.input_latency is not None else cfg.get("retroarch", {}).get("input_latency_frames", 5)
-    stateless = args.stateless if args.stateless is not None else cfg.get("retroarch", {}).get("stateless_mode", False)
+    stateless = args.stateless if args.stateless is not None else cfg.get("retroarch", {}).get("stateless_mode", True)
     sync_sram = cfg.get("retroarch", {}).get("sync_sram", True)
     pref_arcade = cfg.get("retroarch", {}).get("preferred_arcade_core")
     pref_cores = [pref_arcade] if pref_arcade else None

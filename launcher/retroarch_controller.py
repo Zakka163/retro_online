@@ -311,7 +311,7 @@ class RetroArchController:
             ]
             if log_errors:
                 logger.warning("Log diagnosa / kesalahan dari RetroArch:")
-                for le in log_errors[:10]:
+                for le in log_errors[-20:]:
                     logger.warning(f"  -> {le}")
 
             # Detect premature shutdown (< 2.0s) where core failed to load content
@@ -344,7 +344,8 @@ class RetroArchController:
 
             logger.info(f"RetroArch selesai: {status} (Exit Code: {exit_code}, Durasi: {duration:.1f}s)")
             if err_msg:
-                logger.warning(f"Keterangan: {err_msg[:250]}")
+                tail_lines = [l.strip() for l in err_msg.splitlines() if l.strip()][-15:]
+                logger.warning("Keterangan (ekor log RetroArch):\n  " + "\n  ".join(tail_lines))
 
             return RetroArchProcessResult(
                 exit_code=exit_code,

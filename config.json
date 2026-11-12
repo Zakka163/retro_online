@@ -31,12 +31,12 @@
     "scan_local_roms_only": true,
     // true = buka game dalam layar penuh (fullscreen), false = windowed
     "fullscreen": true,
-    // Frekuensi cek sinkronisasi Netplay dalam frame (600 = tiap ~10 detik di 60 FPS, ramah WiFi)
-    "check_frames": 600,
+    // Frekuensi cek savestate Netplay dalam frame (0 = nonaktif, WAJIB 0 untuk lintas OS Mac/Windows/Linux agar savestate FBNeo tidak crash)
+    "check_frames": 0,
     // Buffer input kontroler dalam frame (5 frame = ~83ms, meredam jitter/lonjakan lag WiFi)
     "input_latency_frames": 5,
-    // false = mode netplay standar RetroArch (direkomendasikan, mencegah crash handshake di RetroArch 1.22)
-    "stateless_mode": false,
+    // true = murni kirim input tanpa kirim savestate lintas OS (mencegah crash 0xC0000005 Mac <-> Windows)
+    "stateless_mode": true,
     // true = sinkronkan save RAM dari host, false = mulai dari RAM bersih
     "sync_sram": false,
     // Core arcade prioritas utama (fbneo = FinalBurn Neo, terbaik untuk arcade netplay)
