@@ -15,20 +15,31 @@ KEY="${SSH_DIR}/id_ed25519"
 
 mkdir -p "$SSH_DIR" && chmod 700 "$SSH_DIR"
 
-if [[ ! -f "$KEY" ]]; then
+if [[ ! -f "$KEY" && ! -f "${SSH_DIR}/id_rsa" ]]; then
   echo "[1/3] Membuat SSH key baru: $KEY"
   ssh-keygen -t ed25519 -N "" -C "arcade-$(hostname)" -f "$KEY" \
     || ssh-keygen -t rsa -b 4096 -N "" -C "arcade-$(hostname)" -f "${SSH_DIR}/id_rsa"
 else
-  echo "[1/3] SSH key sudah ada: $KEY"
+  echo "[1/3] SSH key sudah ada di: $SSH_DIR"
 fi
-PUB="$(ls "${SSH_DIR}"/id_ed25519.pub "${SSH_DIR}"/id_rsa.pub 2>/dev/null | head -n1)"
+
+PUB=""
+if [[ -f "${SSH_DIR}/id_ed25519.pub" ]]; then
+  PUB="${SSH_DIR}/id_ed25519.pub"
+elif [[ -f "${SSH_DIR}/id_rsa.pub" ]]; then
+  PUB="${SSH_DIR}/id_rsa.pub"
+else
+  echo "[X] Error: File public key (.pub) tidak ditemukan di $SSH_DIR" >&2
+  exit 1
+fi
+
+PUB_CONTENT="$(cat "$PUB")"
 
 echo "[2/3] Mendaftarkan public key ke ${VPS_USER}@${VPS_HOST}:${VPS_PORT} (masukkan password VPS sekali)..."
 ssh -p "$VPS_PORT" -o StrictHostKeyChecking=accept-new "${VPS_USER}@${VPS_HOST}" \
   "mkdir -p ~/.ssh '${REMOTE_DIR}' && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && \
-   chmod 600 ~/.ssh/authorized_keys && grep -qxF '$(cat "$PUB")' ~/.ssh/authorized_keys || \
-   echo '$(cat "$PUB")' >> ~/.ssh/authorized_keys"
+   chmod 600 ~/.ssh/authorized_keys && grep -qxF '${PUB_CONTENT}' ~/.ssh/authorized_keys || \
+   echo '${PUB_CONTENT}' >> ~/.ssh/authorized_keys"
 
 echo "[3/3] Menguji login tanpa password..."
 if ssh -p "$VPS_PORT" -o BatchMode=yes "${VPS_USER}@${VPS_HOST}" "test -d '${REMOTE_DIR}' && echo OK"; then
@@ -37,4 +48,3 @@ else
   echo "[X] Login tanpa password gagal. Periksa kembali key / izin di VPS." >&2
   exit 1
 fi
-

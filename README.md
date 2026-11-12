@@ -222,16 +222,14 @@ Autentikasi **hanya memakai SSH key**. Kata sandi VPS tidak disimpan di kode mau
 
 ### 1. Setup SSH key (sekali per mesin)
 
-**Linux / macOS:**
+**Semua OS (Windows / macOS / Linux) - Paling Mudah:**
 ```bash
-./setup_log_ssh.sh
+python setup_log_ssh.py
 ```
 
-**Windows:**
-Klik dua kali file `setup_log_ssh.bat` atau jalankan via PowerShell:
-```powershell
-.\setup_log_ssh.ps1
-```
+**Atau lewat skrip sistem:**
+- **Windows:** Klik dua kali `setup_log_ssh.bat` atau jalankan `powershell -ExecutionPolicy Bypass -File .\setup_log_ssh.ps1`
+- **Linux / macOS:** `./setup_log_ssh.sh`
 
 Skrip ini membuat SSH key (jika belum ada), mendaftarkannya ke VPS (kata sandi VPS diminta **satu kali**), dan menguji login tanpa kata sandi.
 
