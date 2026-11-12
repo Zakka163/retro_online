@@ -44,7 +44,8 @@ class ArcadeLauncherApp:
                  input_latency_frames: int = 2,
                  stateless_mode: bool = False,
                  sync_sram: bool = True,
-                 preferred_arcade_cores: Optional[List[str]] = None):
+                 preferred_arcade_cores: Optional[List[str]] = None,
+                 local_roms_only: bool = False):
         self.server_url = server_url
         self.player_name = player_name
         self.dry_run = dry_run
@@ -56,16 +57,16 @@ class ArcadeLauncherApp:
         self.custom_rom_dirs = custom_rom_dirs or []
         self.custom_core_dirs = custom_core_dirs or []
         self.preferred_arcade_cores = preferred_arcade_cores
+        self.local_roms_only = local_roms_only
 
         from catalog.scanner import SystemScanner
         self.scanner = SystemScanner(
             custom_rom_dirs=self.custom_rom_dirs,
             custom_core_dirs=self.custom_core_dirs,
-            preferred_arcade_cores=self.preferred_arcade_cores
+            preferred_arcade_cores=self.preferred_arcade_cores,
+            local_roms_only=self.local_roms_only
         )
         self.manifest = GameManifest(scanner=self.scanner)
-        # Merge dynamically scanned games on startup
-        self.manifest.scan_and_merge(self.scanner)
 
         from catalog.validator import find_retroarch_binary
         self.retroarch_bin = retroarch_bin or find_retroarch_binary()
@@ -74,7 +75,8 @@ class ArcadeLauncherApp:
             manifest=self.manifest,
             rom_dirs=self.custom_rom_dirs,
             core_dirs=self.custom_core_dirs,
-            retroarch_bin=self.retroarch_bin
+            retroarch_bin=self.retroarch_bin,
+            local_roms_only=self.local_roms_only
         )
         self.api = ArcadeClientAPI(server_url=self.server_url)
         self.conn_mgr = ConnectionManager(api=self.api)
@@ -459,55 +461,86 @@ class ArcadeLauncherApp:
     def _main_menu_loop(self) -> None:
         """Layar 1: Pemilihan Game & Scanner."""
         selected_idx = 0
+        needs_redraw = True
+        last_render_time = 0.0
 
-        while True:
+        # Prime asynchronous health check in background
+        self.api.get_cached_health()
+
+        def build_menu_items():
             games = self.manifest.list_games()
-            menu_items = []
+            items = []
             if not games:
-                menu_items.append(("[ ! ] Tidak ada ROM arcade terdeteksi", "empty_hint"))
+                items.append(("[ ! ] Tidak ada ROM arcade terdeteksi", "empty_hint"))
             else:
                 for g in games:
                     status_icon = "✓" if g.get("status") == "ready" or g.get("scanned_rom_path") else " "
-                    menu_items.append((f"[{status_icon}] {g['display_name']}", g))
-            menu_items.append(("🔄 PINDAI ULANG DISK / RESCAN", "rescan"))
-            menu_items.append(("📋 LIHAT LOG SISTEM", "view_logs"))
+                    items.append((f"[{status_icon}] {g['display_name']}", g))
+            items.append(("🔄 PINDAI ULANG DISK / RESCAN", "rescan"))
+            scan_label = "📁 MODE SCAN: HANYA FOLDER ROMS" if self.local_roms_only else "🌐 MODE SCAN: SEMUA FOLDER SISTEM"
+            items.append((scan_label, "toggle_scan_mode"))
+            items.append(("📋 LIHAT LOG SISTEM", "view_logs"))
+            return items
 
-            # Check server status
-            online, _ = self.api.check_health()
+        menu_items = build_menu_items()
+
+        while True:
+            if selected_idx >= len(menu_items):
+                selected_idx = max(0, len(menu_items) - 1)
+
+            # Check server status non-blocking
+            online, _ = self.api.get_cached_health(max_age=5.0)
             status_text = "Online" if online else "Offline (Periksa Server)"
 
-            lines = ["PILIH GAME (✓ = Siap Main):"]
-            for idx, (label, _) in enumerate(menu_items):
-                prefix = "> [ " if idx == selected_idx else "  [ "
-                suffix = " ]"
-                lines.append(f"{prefix}{label}{suffix}")
+            now = time.time()
+            if needs_redraw or (now - last_render_time >= 1.0):
+                lines = ["PILIH GAME (✓ = Siap Main):"]
+                for idx, (label, _) in enumerate(menu_items):
+                    prefix = "> [ " if idx == selected_idx else "  [ "
+                    suffix = " ]"
+                    lines.append(f"{prefix}{label}{suffix}")
 
-            lines.append("")
-            lines.append(f"Status Layanan: {status_text}")
+                lines.append("")
+                lines.append(f"Status Layanan: {status_text}")
 
-            self.ui.draw_box(
-                "ARCADE ONLINE",
-                lines,
-                "UP/DOWN: Pilih | ENTER: Buka | ESC: Keluar"
-            )
+                self.ui.draw_box(
+                    "ARCADE ONLINE",
+                    lines,
+                    "UP/DOWN: Pilih | ENTER: Buka | ESC: Keluar"
+                )
+                last_render_time = now
+                needs_redraw = False
 
             key = self.ui.get_key()
             if self.ui.is_back(key):
                 break
             elif self.ui.is_up(key):
                 selected_idx = (selected_idx - 1) % len(menu_items)
+                needs_redraw = True
             elif self.ui.is_down(key):
                 selected_idx = (selected_idx + 1) % len(menu_items)
+                needs_redraw = True
             elif self.ui.is_enter(key):
+                needs_redraw = True
                 _, selected_data = menu_items[selected_idx]
                 if selected_data == "rescan":
                     # Trigger dynamic re-scan
                     logger.info("Menu Utama: Memulai pemindaian ulang disk (RESCAN)...")
                     self.ui.show_message("MEMINDAI...", "Sedang memindai direktori ROM dan core...", wait_seconds=0.5)
                     self.manifest.scan_and_merge(self.scanner)
+                    menu_items = build_menu_items()
                     games_count = len(self.manifest.list_games())
                     logger.info(f"Menu Utama: Pemindaian selesai. Total game terdaftar: {games_count}")
                     self.ui.show_message("SELESAI", f"Ditemukan {games_count} game arcade!", wait_seconds=1.5)
+                elif selected_data == "toggle_scan_mode":
+                    self.local_roms_only = not self.local_roms_only
+                    self.scanner.local_roms_only = self.local_roms_only
+                    self.validator.local_roms_only = self.local_roms_only
+                    mode_str = "Hanya Folder ROMs Lokal (roms/)" if self.local_roms_only else "Semua Folder Sistem & Eksternal"
+                    logger.info(f"Menu Utama: Mode scan diubah menjadi [{mode_str}]")
+                    self.ui.show_message("MODE SCAN DIUBAH", f"Mode scan aktif:\n{mode_str}\n\nMemindai ulang...", wait_seconds=1.0)
+                    self.manifest.scan_and_merge(self.scanner)
+                    menu_items = build_menu_items()
                 elif selected_data == "empty_hint":
                     logger.info("Menu Utama: Petunjuk penempatan ROM ditampilkan.")
                     self.ui.show_message("PETUNJUK", "Letakkan file ROM (.zip) di folder roms, lalu pilih RESCAN.", wait_seconds=2.5)
@@ -522,42 +555,55 @@ class ArcadeLauncherApp:
         """Layar 2: Cari Room / Buat Room."""
         actions = ["CARI ROOM", "BUAT ROOM", "KEMBALI"]
         selected_idx = 0
+        needs_redraw = True
+        last_render_time = 0.0
+
+        # Prime room cache asynchronously
+        self.api.get_cached_rooms(game["game_id"])
 
         while True:
-            # Refresh online players count
-            rooms = self.api.list_rooms(game["game_id"])
-            total_players = len(rooms) * 2  # Estimate
+            # Refresh online players count non-blocking
+            rooms = self.api.get_cached_rooms(game["game_id"], max_age=3.0)
 
-            lines = [
-                f"Game: {game['display_name']}",
-                "",
-                "PILIHAN MENU:"
-            ]
-            for idx, act in enumerate(actions):
-                prefix = "> [ " if idx == selected_idx else "  [ "
-                lines.append(f"{prefix}{act} ]")
+            now = time.time()
+            if needs_redraw or (now - last_render_time >= 1.0):
+                lines = [
+                    f"Game: {game['display_name']}",
+                    "",
+                    "PILIHAN MENU:"
+                ]
+                for idx, act in enumerate(actions):
+                    prefix = "> [ " if idx == selected_idx else "  [ "
+                    lines.append(f"{prefix}{act} ]")
 
-            lines.append("")
-            lines.append(f"Room Aktif: {len(rooms)}")
+                lines.append("")
+                lines.append(f"Room Aktif: {len(rooms)}")
 
-            self.ui.draw_box(
-                game["display_name"],
-                lines,
-                "UP/DOWN: Pilih | ENTER: Buka | ESC: Kembali"
-            )
+                self.ui.draw_box(
+                    game["display_name"],
+                    lines,
+                    "UP/DOWN: Pilih | ENTER: Buka | ESC: Kembali"
+                )
+                last_render_time = now
+                needs_redraw = False
 
             key = self.ui.get_key()
             if self.ui.is_back(key):
                 break
             elif self.ui.is_up(key):
                 selected_idx = (selected_idx - 1) % len(actions)
+                needs_redraw = True
             elif self.ui.is_down(key):
                 selected_idx = (selected_idx + 1) % len(actions)
+                needs_redraw = True
             elif self.ui.is_enter(key):
+                needs_redraw = True
                 action = actions[selected_idx]
                 logger.info(f"Menu Aksi Game '{game.get('display_name')}': Memilih [{action}]")
                 if action in ("CARI ROOM", "BUAT ROOM"):
-                    online, _ = self.api.check_health()
+                    online, _ = self.api.get_cached_health(max_age=3.0)
+                    if not online:
+                        online, _ = self.api.check_health()
                     if not online:
                         logger.warning("Pemeriksaan server sebelum aksi: SERVER OFFLINE.")
                         self.ui.show_message(
@@ -577,34 +623,50 @@ class ArcadeLauncherApp:
     def _browse_rooms_loop(self, game: Dict[str, Any]) -> None:
         """Layar 3: Cari dan Gabung ke Room."""
         selected_idx = 0
+        needs_redraw = True
+        last_render_time = 0.0
+
+        # Prime room and latency checks asynchronously
+        self.api.get_cached_rooms(game["game_id"])
+        self.api.get_cached_latency_ms()
 
         while True:
-            rooms = self.api.list_rooms(game["game_id"])
-            latency = self.api.measure_latency_ms()
+            rooms = self.api.get_cached_rooms(game["game_id"], max_age=2.5)
+            latency = self.api.get_cached_latency_ms(max_age=5.0)
             latency_str = f" ({latency:.0f}ms)" if latency > 0 else ""
-            lines = ["DAFTAR ROOM MENUNGGU LAWAN:", ""]
 
-            if not rooms:
-                lines.append("Belum ada room tersedia.")
-                lines.append("Pilih [BUAT ROOM] untuk menjadi Host!")
-            else:
-                for idx, r in enumerate(rooms):
-                    prefix = "> " if idx == selected_idx else "  "
-                    lines.append(f"{prefix}[{r['name']}] Host: {r['host_name']}{latency_str}")
+            if rooms and selected_idx >= len(rooms):
+                selected_idx = max(0, len(rooms) - 1)
 
-            self.ui.draw_box(
-                f"CARI ROOM - {game['display_name']}",
-                lines,
-                "UP/DOWN: Pilih | ENTER: Gabung | ESC: Batal"
-            )
+            now = time.time()
+            if needs_redraw or (now - last_render_time >= 1.0):
+                lines = ["DAFTAR ROOM MENUNGGU LAWAN:", ""]
+
+                if not rooms:
+                    lines.append("Belum ada room tersedia.")
+                    lines.append("Pilih [BUAT ROOM] untuk menjadi Host!")
+                else:
+                    for idx, r in enumerate(rooms):
+                        prefix = "> " if idx == selected_idx else "  "
+                        lines.append(f"{prefix}[{r['name']}] Host: {r['host_name']}{latency_str}")
+
+                self.ui.draw_box(
+                    f"CARI ROOM - {game['display_name']}",
+                    lines,
+                    "UP/DOWN: Pilih | ENTER: Gabung | ESC: Batal"
+                )
+                last_render_time = now
+                needs_redraw = False
 
             key = self.ui.get_key()
             if self.ui.is_back(key):
                 break
             elif rooms and self.ui.is_up(key):
                 selected_idx = (selected_idx - 1) % len(rooms)
+                needs_redraw = True
             elif rooms and self.ui.is_down(key):
                 selected_idx = (selected_idx + 1) % len(rooms)
+                needs_redraw = True
             elif rooms and self.ui.is_enter(key):
                 selected_room = rooms[selected_idx]
                 self._join_room_flow(game, selected_room)
@@ -640,25 +702,37 @@ class ArcadeLauncherApp:
         # Waiting screen
         opponent_name = None
         last_poll = time.time()
+        last_heartbeat = 0.0
+        needs_redraw = True
+        last_render_time = 0.0
 
         try:
             while not opponent_name:
-                lines = [
-                    f"Room: {room_name}",
-                    f"Room ID: {room_id}",
-                    "",
-                    "Menunggu lawan bergabung...",
-                    ""
-                ]
-                self.ui.draw_box("MENUNGGU LAWAN", lines, "Tekan ESC untuk Batal")
+                now = time.time()
+                if needs_redraw or (now - last_render_time >= 1.0):
+                    lines = [
+                        f"Room: {room_name}",
+                        f"Room ID: {room_id}",
+                        "",
+                        "Menunggu lawan bergabung...",
+                        ""
+                    ]
+                    self.ui.draw_box("MENUNGGU LAWAN", lines, "Tekan ESC untuk Batal")
+                    last_render_time = now
+                    needs_redraw = False
 
                 key = self.ui.get_key()
                 if self.ui.is_back(key):
                     logger.info(f"Host membatalkan room {room_id}.")
                     return  # Canceled
 
-                self.api.send_heartbeat(room_id, host_id, host_token)
-                signals = self.api.poll_signals(room_id, host_id, since=last_poll, timeout=0.5)
+                # Send heartbeat every 3.0s (not every tick!)
+                if now - last_heartbeat >= 3.0:
+                    self.api.send_heartbeat(room_id, host_id, host_token)
+                    last_heartbeat = now
+
+                # Poll signals with short timeout (0.2s)
+                signals = self.api.poll_signals(room_id, host_id, since=last_poll, timeout=0.2)
                 last_poll = time.time()
 
                 for s in signals:

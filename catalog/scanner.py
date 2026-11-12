@@ -141,11 +141,13 @@ class SystemScanner:
     def __init__(self, custom_rom_dirs: Optional[List[str]] = None,
                  custom_core_dirs: Optional[List[str]] = None,
                  cache_file: Optional[str] = None,
-                 preferred_arcade_cores: Optional[List[str]] = None):
+                 preferred_arcade_cores: Optional[List[str]] = None,
+                 local_roms_only: bool = False):
         self.custom_rom_dirs = custom_rom_dirs or []
         self.custom_core_dirs = custom_core_dirs or []
         self.preferred_arcade_cores = preferred_arcade_cores or PREFERRED_ARCADE_CORES
         self.cache_file = cache_file or os.path.expanduser("~/.arcade_online_cache.json")
+        self.local_roms_only = local_roms_only or (os.environ.get("ARCADE_LOCAL_ROMS_ONLY") == "1")
         self.installed_cores: Dict[str, str] = {}  # core_name -> path
         self.discovered_games: Dict[str, ScannedGame] = {}
 
@@ -270,6 +272,12 @@ class SystemScanner:
         if env_roms and env_roms not in dirs:
             dirs.append(env_roms)
 
+        # Mode isolasi lokal: Hanya scan folder 'roms/' di proyek ini, abaikan semua folder OS lainnya
+        if self.local_roms_only or os.environ.get("ARCADE_LOCAL_ROMS_ONLY") == "1":
+            local_dirs = [d for d in dirs if os.path.isdir(d)]
+            logger.info(f"Scanner ROM: Mode 'Hanya Folder ROMs Lokal' aktif ({local_dirs})")
+            return local_dirs
+
         system = platform.system()
         if system == "Linux":
             dirs.extend([
@@ -280,8 +288,8 @@ class SystemScanner:
                 "/storage/roms/mame",                           # EmuELEC
                 "/storage/roms/fbneo",
                 "/storage/roms/arcade",
+                "/storage/roms/neogeo",
                 "/storage/roms/snes",
-                "/storage/roms",
                 "/home/pi/RetroPie/roms/arcade",               # RetroPie
                 "/home/pi/RetroPie/roms/mame-libretro",
                 "/home/pi/RetroPie/roms/fba",

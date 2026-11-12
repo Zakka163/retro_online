@@ -236,8 +236,10 @@ class CatalogValidator:
     def __init__(self, manifest: Optional[GameManifest] = None,
                  rom_dirs: Optional[List[str]] = None,
                  core_dirs: Optional[List[str]] = None,
-                 retroarch_bin: Optional[str] = None):
+                 retroarch_bin: Optional[str] = None,
+                 local_roms_only: bool = False):
         self.manifest = manifest or GameManifest()
+        self.local_roms_only = local_roms_only or (os.environ.get("ARCADE_LOCAL_ROMS_ONLY") == "1")
         self.rom_dirs = rom_dirs or self._default_rom_dirs()
         self.core_dirs = core_dirs or []
         self.retroarch_bin = retroarch_bin
@@ -257,6 +259,9 @@ class CatalogValidator:
         env_rom_dir = os.environ.get("ARCADE_ROMS_DIR")
         if env_rom_dir and env_rom_dir not in dirs:
             dirs.append(env_rom_dir)
+
+        if getattr(self, "local_roms_only", False) or os.environ.get("ARCADE_LOCAL_ROMS_ONLY") == "1":
+            return [d for d in dirs if os.path.isdir(d)]
         system = platform.system()
         if system == "Linux":
             dirs.extend([

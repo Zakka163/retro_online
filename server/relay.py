@@ -371,7 +371,6 @@ class LocalRelayBridge:
                 logger.info(f"[LocalRelayBridge] Port listening Client {self.local_target_port} siap.")
             except Exception as e:
                 logger.warning(f"[LocalRelayBridge] Pre-bind listen port {self.local_target_port} error: {e}")
-        self.ready_event.set()
         self._thread = threading.Thread(target=self._run_bridge, daemon=True)
         self._thread.start()
 
@@ -434,7 +433,16 @@ class LocalRelayBridge:
         relay_sock = None
         local_sock = None
         try:
-            # 1. Handle local socket connection
+            # 1. Connect to Relay Server (wait up to 60s initially for opponent)
+            logger.info(f"[LocalRelayBridge] Menghubungkan ke Relay VPS {self.relay_host}:{self.relay_port}...")
+            relay_sock = self._connect_relay_socket(timeout=60.0)
+            if not relay_sock:
+                logger.warning("[LocalRelayBridge] Handshake relay gagal atau ditutup.")
+                return
+
+            self.ready_event.set()
+
+            # 2. Handle local socket connection
             if self.role == "CLIENT":
                 listen_sock = self._client_listen_sock
                 if listen_sock is None:
@@ -455,15 +463,8 @@ class LocalRelayBridge:
                         pass
                     self._client_listen_sock = None
 
-            # 2. Connect to Relay Server (wait up to 60s initially for opponent)
-            logger.info(f"[LocalRelayBridge] Menghubungkan ke Relay VPS {self.relay_host}:{self.relay_port}...")
-            relay_sock = self._connect_relay_socket(timeout=60.0)
-            if not relay_sock:
-                logger.warning("[LocalRelayBridge] Handshake relay gagal atau ditutup.")
-                return
-
             # 3. For Host: bridge connects to local RetroArch server listening on local_target_port
-            if self.role == "HOST":
+            elif self.role == "HOST":
                 connected = False
                 for attempt in range(60):
                     if self._stop_event.is_set():

@@ -65,6 +65,25 @@ def get_local_ip() -> str:
         return "127.0.0.1"
 
 
+def get_all_local_ips() -> List[str]:
+    """Collect all valid candidate IPv4 addresses across local network interfaces."""
+    ips: List[str] = []
+    primary = get_local_ip()
+    if primary and primary != "127.0.0.1":
+        ips.append(primary)
+
+    try:
+        hostname = socket.gethostname()
+        for info in socket.getaddrinfo(hostname, None, socket.AF_INET, socket.SOCK_STREAM):
+            ip = info[4][0]
+            if ip and not ip.startswith("127.") and ip not in ips:
+                ips.append(ip)
+    except Exception:
+        pass
+
+    return ips or ["127.0.0.1"]
+
+
 class ConnectionManager:
     """Coordinates direct P2P connectivity and Relay fallback."""
 
@@ -136,12 +155,13 @@ class ConnectionManager:
 
         # Broadcast Host candidate IP and port
         local_ip = get_local_ip()
-        logger.info(f"[Host] Memulai negosiasi koneksi room {room_id}. Kandidat IP lokal: {local_ip}:{netplay_port}")
+        candidate_ips = get_all_local_ips()
+        logger.info(f"[Host] Memulai negosiasi koneksi room {room_id}. Kandidat IP lokal: {candidate_ips}:{netplay_port}")
         self.api.send_signal(
             room_id=room_id,
             sender_id=host_id,
             event="connection.candidate",
-            payload={"ip": local_ip, "port": netplay_port}
+            payload={"ip": local_ip, "ips": candidate_ips, "port": netplay_port}
         )
 
         # 2. Wait for client response
@@ -299,15 +319,20 @@ class ConnectionManager:
             )
 
         host_ip = host_candidate.get("ip")
+        host_ips = host_candidate.get("ips") or ([host_ip] if host_ip else [])
         host_port = int(host_candidate.get("port", 55435))
-        logger.info(f"[Client] Kandidat Host ditemukan: {host_ip}:{host_port}")
+        logger.info(f"[Client] Kandidat Host ditemukan: {host_ips}:{host_port}")
 
         # 2. Probe direct connection
         direct_ok = False
-        target_connect_ip = host_ip
-        candidate_ips = [host_ip]
+        target_connect_ip = host_ip or "127.0.0.1"
+        candidate_ips = []
+        for ip in host_ips:
+            if ip and ip not in candidate_ips:
+                candidate_ips.append(ip)
+
         local_my_ip = get_local_ip()
-        if (host_ip == local_my_ip or host_ip.startswith("192.168.") or host_ip.startswith("10.")) and "127.0.0.1" not in candidate_ips:
+        if (any(ip == local_my_ip or ip.startswith("192.168.") or ip.startswith("10.") for ip in candidate_ips)) and "127.0.0.1" not in candidate_ips:
             candidate_ips.append("127.0.0.1")
 
         logger.info(f"[Client] Menguji probe koneksi langsung ke: {candidate_ips} (timeout: {self.direct_timeout}s)...")
@@ -367,6 +392,19 @@ class ConnectionManager:
             local_target_port=local_client_port
         )
         bridge.start()
+
+        # Menunggu sampai jalur relay tersambung penuh dengan VPS & Host
+        logger.info("[Client] Menunggu jalur Relay ke Host terhubung penuh...")
+        if not bridge.ready_event.wait(timeout=15.0):
+            logger.error("[Client] Timeout menunggu koneksi Relay ke Host!")
+            bridge.stop()
+            self._update_step(steps, 4, "failed", on_progress)
+            return ConnectionResult(
+                success=False,
+                error_code="RELAY_UNAVAILABLE",
+                error_message="Timeout saat menghubungkan Relay ke Host.",
+                steps=steps
+            )
 
         self._update_step(steps, 4, "completed", on_progress)
         self._update_step(steps, 5, "completed", on_progress)

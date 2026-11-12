@@ -56,7 +56,7 @@ class ArcadeTUI:
             except Exception:
                 pass
             self.stdscr.keypad(True)
-            self.stdscr.timeout(50)  # 50ms responsive poll timeout
+            self.stdscr.timeout(25)  # 25ms responsive poll timeout (~40 FPS)
 
             if curses.has_colors():
                 curses.start_color()
@@ -200,7 +200,7 @@ class ArcadeTUI:
         if not self.curses_available or not self.stdscr:
             return
 
-        self.stdscr.clear()
+        self.stdscr.erase()
         h, w = self.stdscr.getmaxyx()
         box_w = min(w - 4, 60)
         box_h = min(h - 4, len(lines) + 8)
@@ -282,35 +282,45 @@ class ArcadeTUI:
             return
 
         scroll_offset = 0
+        needs_redraw = True
+        last_logs_count = -1
 
         while True:
             logs = get_logs_func()
-            h, w = self.stdscr.getmaxyx()
-            visible_lines_count = max(4, h - 8)
+            if len(logs) != last_logs_count:
+                needs_redraw = True
+                last_logs_count = len(logs)
 
-            total_logs = len(logs)
-            if not logs:
-                display_lines = ["Belum ada log tercatat."]
-            else:
-                max_scroll = max(0, total_logs - visible_lines_count)
-                scroll_offset = min(scroll_offset, max_scroll)
-                start_idx = max(0, total_logs - visible_lines_count - scroll_offset)
-                end_idx = start_idx + visible_lines_count
-                display_lines = logs[start_idx:end_idx]
+            if needs_redraw:
+                h, w = self.stdscr.getmaxyx()
+                visible_lines_count = max(4, h - 8)
 
-            self.draw_box(
-                "LOG SISTEM LAUNCHER",
-                display_lines,
-                "UP/DOWN: Gulir | ENTER/ESC: Tutup"
-            )
+                total_logs = len(logs)
+                if not logs:
+                    display_lines = ["Belum ada log tercatat."]
+                else:
+                    max_scroll = max(0, total_logs - visible_lines_count)
+                    scroll_offset = min(scroll_offset, max_scroll)
+                    start_idx = max(0, total_logs - visible_lines_count - scroll_offset)
+                    end_idx = start_idx + visible_lines_count
+                    display_lines = logs[start_idx:end_idx]
+
+                self.draw_box(
+                    "LOG SISTEM LAUNCHER",
+                    display_lines,
+                    "UP/DOWN: Gulir | ENTER/ESC: Tutup"
+                )
+                needs_redraw = False
 
             key = self.get_key()
             if self.is_back(key) or self.is_enter(key):
                 break
             elif self.is_up(key):
                 scroll_offset = min(scroll_offset + 1, max(0, len(logs) - visible_lines_count))
+                needs_redraw = True
             elif self.is_down(key):
                 scroll_offset = max(0, scroll_offset - 1)
+                needs_redraw = True
 
 
 class ArcadeCLI:

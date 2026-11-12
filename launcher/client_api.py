@@ -3,6 +3,7 @@
 import json
 import time
 import logging
+import threading
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -15,9 +16,97 @@ class ArcadeClientAPI:
     """Communicates with the Arcade Online backend Matchmaking & Signaling server."""
 
     def __init__(self, server_url: str = "http://localhost:8080", timeout: float = 8.0):
-        self.server_url = server_url.rstrip("/")
+        self.server_url = str(server_url).strip().rstrip("/")
         self.timeout = timeout
+        self._cached_health: Optional[Tuple[bool, Dict[str, Any]]] = None
+        self._health_time: float = 0.0
+        self._cached_rooms: Dict[Optional[str], Tuple[float, List[Dict[str, Any]]]] = {}
+        self._cached_latency: Optional[float] = None
+        self._latency_time: float = 0.0
+        self._bg_threads: Dict[str, threading.Thread] = {}
+        self._cache_lock = threading.Lock()
         logger.debug(f"ArcadeClientAPI diinisialisasi untuk server: {self.server_url} (timeout: {self.timeout}s)")
+
+    def invalidate_room_cache(self) -> None:
+        """Clear cached room lists so subsequent queries fetch fresh data."""
+        with self._cache_lock:
+            self._cached_rooms.clear()
+
+    def get_cached_health(self, max_age: float = 5.0) -> Tuple[bool, Dict[str, Any]]:
+        """Return cached server health status immediately, refreshing asynchronously if stale."""
+        now = time.time()
+        with self._cache_lock:
+            if self._cached_health is not None and (now - self._health_time < max_age):
+                return self._cached_health
+
+            thread_key = "health"
+            t = self._bg_threads.get(thread_key)
+            if t is None or not t.is_alive():
+                def _worker():
+                    try:
+                        res = self.check_health()
+                        with self._cache_lock:
+                            self._cached_health = res
+                            self._health_time = time.time()
+                    except Exception:
+                        pass
+                new_t = threading.Thread(target=_worker, daemon=True)
+                self._bg_threads[thread_key] = new_t
+                new_t.start()
+
+            if self._cached_health is not None:
+                return self._cached_health
+            return (False, {})
+
+    def get_cached_rooms(self, game_id: Optional[str] = None, max_age: float = 2.5) -> List[Dict[str, Any]]:
+        """Return cached room list immediately, refreshing asynchronously if stale."""
+        now = time.time()
+        with self._cache_lock:
+            cached = self._cached_rooms.get(game_id)
+            if cached is not None and (now - cached[0] < max_age):
+                return cached[1]
+
+            thread_key = f"rooms_{game_id}"
+            t = self._bg_threads.get(thread_key)
+            if t is None or not t.is_alive():
+                def _worker():
+                    try:
+                        rooms = self.list_rooms(game_id)
+                        with self._cache_lock:
+                            self._cached_rooms[game_id] = (time.time(), rooms)
+                    except Exception:
+                        pass
+                new_t = threading.Thread(target=_worker, daemon=True)
+                self._bg_threads[thread_key] = new_t
+                new_t.start()
+
+            if cached is not None:
+                return cached[1]
+            return []
+
+    def get_cached_latency_ms(self, max_age: float = 5.0) -> float:
+        """Return cached latency immediately, refreshing asynchronously if stale."""
+        now = time.time()
+        with self._cache_lock:
+            if self._cached_latency is not None and (now - self._latency_time < max_age):
+                return self._cached_latency
+
+            thread_key = "latency"
+            t = self._bg_threads.get(thread_key)
+            if t is None or not t.is_alive():
+                def _worker():
+                    try:
+                        lat = self.measure_latency_ms()
+                        with self._cache_lock:
+                            self._cached_latency = lat
+                            self._latency_time = time.time()
+                    except Exception:
+                        pass
+                new_t = threading.Thread(target=_worker, daemon=True)
+                self._bg_threads[thread_key] = new_t
+                new_t.start()
+
+            return self._cached_latency if self._cached_latency is not None else 0.0
 
     def _request(self, method: str, path: str,
                  body: Optional[Dict[str, Any]] = None,
@@ -134,6 +223,7 @@ class ArcadeClientAPI:
         status, data = self._request("POST", "/api/rooms", body=payload)
         success = (status == 201)
         if success:
+            self.invalidate_room_cache()
             logger.info(f"Room berhasil dibuat! ID: {data.get('room_id')} (Host Token: {data.get('host_token')[:6]}...)")
         else:
             logger.error(f"Gagal membuat room: {data.get('message')}")
@@ -151,6 +241,7 @@ class ArcadeClientAPI:
         status, data = self._request("POST", f"/api/rooms/{room_id}/join", body=payload)
         success = (status == 200)
         if success:
+            self.invalidate_room_cache()
             logger.info(f"Berhasil bergabung ke room {room_id}! Player ID: {data.get('player_id')}")
         else:
             logger.warning(f"Gagal bergabung ke room {room_id}: {data.get('message')}")
@@ -161,14 +252,20 @@ class ArcadeClientAPI:
         logger.info(f"Meninggalkan room {room_id} (Player ID: {player_id})")
         payload = {"player_id": player_id, "token": token}
         status, _ = self._request("POST", f"/api/rooms/{room_id}/leave", body=payload)
-        return status == 200
+        if status == 200:
+            self.invalidate_room_cache()
+            return True
+        return False
 
     def close_room(self, room_id: str, host_token: str) -> bool:
         """Host close room."""
         logger.info(f"Menutup dan menghapus room {room_id} dari server")
         headers = {"X-Host-Token": host_token}
         status, _ = self._request("DELETE", f"/api/rooms/{room_id}", headers=headers)
-        return status == 200
+        if status == 200:
+            self.invalidate_room_cache()
+            return True
+        return False
 
     def send_heartbeat(self, room_id: str, player_id: str, token: str,
                        timeout: Optional[float] = None,
