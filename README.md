@@ -131,7 +131,7 @@ Tampilan fullscreen/windowed diatur lewat `"fullscreen"` di `config.json`.
 | `client` | `direct_connection_timeout` | Batas waktu uji P2P langsung (disarankan `5.0` untuk WiFi) |
 | `retroarch` | `check_frames` | Interval cek sinkronisasi netplay. Disarankan `600` (~10 detik) |
 | `retroarch` | `input_latency_frames` | Buffer input. `5` (~83 ms) untuk meredam jitter WiFi |
-| `retroarch` | `stateless_mode` | `true` = mode lockstep |
+| `retroarch` | `stateless_mode` | `false` = mode netplay standar (direkomendasikan agar tidak crash saat handshake) |
 | `retroarch` | `preferred_arcade_core` | Core arcade utama, mis. `fbneo` |
 | `logging` | `auto_upload` | `true` = kirim log ke VPS otomatis |
 | `logging` | `remote_host` / `remote_port` / `remote_path` | Tujuan upload log |
@@ -245,44 +245,6 @@ ssh root@<IP_EMUELEC> "cd /storage/online_netplay && ./setup_log_ssh.sh"
 ```bash
 python3 -m launcher.main --upload-logs
 ```
-
-### 3. Periksa log di server
-
-```bash
-ssh -p 20157 root@217.216.146.15
-ls -lht /root/log_testing/                       # terbaru di atas
-ls /root/log_testing/*ArcadeCab2*                # log satu mesin
-grep -l "out of order" /root/log_testing/*.log   # cari error netplay
-```
-
-Atau unduh semuanya ke lokal:
-
-```bash
-./download_log.sh
-```
-
----
-
-## 🩺 Diagnostik
-
-```bash
-python3 diagnose.py
-```
-
-Memeriksa RetroArch, core libretro (versi + SHA-256), folder ROM, konektivitas server, dan ketersediaan port 55435/55436.
-
----
-
-## 🎮 Kompatibilitas Game & ROM
-
-- **Format ROM:** `.zip`, `.7z`
-- **Sistem:** Arcade (FBNeo / MAME), SNES (`snes9x`), Genesis (`genesis_plus_gx`), NES (`fceumm`)
-- **Lokasi pemindaian:**
-  - Default (`scan_local_roms_only: true`): folder `roms/` di proyek
-  - Dengan `--all-rom-dirs`: folder sistem Batocera/EmuELEC (`/userdata/roms/...`), RetroPie, `~/roms/...`, dan disk eksternal (`/media/*`, `/run/media/*`, `/Volumes/*`)
-- **Folder tambahan:** `--rom-dir /path/ke/roms` atau `custom_roms_dir` di `config.json`
-- **Core tambahan:** `--core-dir /path/ke/cores` atau `custom_cores_dir` di `config.json`
-
 
 ### 3. Periksa log di server
 

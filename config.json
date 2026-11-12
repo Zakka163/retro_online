@@ -35,8 +35,8 @@
     "check_frames": 600,
     // Buffer input kontroler dalam frame (5 frame = ~83ms, meredam jitter/lonjakan lag WiFi)
     "input_latency_frames": 5,
-    // true = mode lockstep (kebal crash savestate antar OS), false = rollback
-    "stateless_mode": true,
+    // false = mode netplay standar RetroArch (direkomendasikan, mencegah crash handshake di RetroArch 1.22)
+    "stateless_mode": false,
     // true = sinkronkan save RAM dari host, false = mulai dari RAM bersih
     "sync_sram": false,
     // Core arcade prioritas utama (fbneo = FinalBurn Neo, terbaik untuk arcade netplay)
