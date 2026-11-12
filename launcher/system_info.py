@@ -176,8 +176,51 @@ def parse_core_info_file(info_path: str) -> Dict[str, str]:
     return meta
 
 
+def get_core_binary_version(core_path: str) -> Tuple[Optional[str], Optional[str]]:
+    """Query retro_get_system_info directly from the Libretro core binary (.dll/.dylib/.so)."""
+    if not core_path or not os.path.isfile(core_path):
+        return None, None
+
+    # 1. Try ctypes retro_get_system_info
+    try:
+        import ctypes
+
+        class RetroSystemInfo(ctypes.Structure):
+            _fields_ = [
+                ("library_name", ctypes.c_char_p),
+                ("library_version", ctypes.c_char_p),
+                ("valid_extensions", ctypes.c_char_p),
+                ("need_fullpath", ctypes.c_bool),
+                ("block_extract", ctypes.c_bool),
+            ]
+
+        lib = ctypes.CDLL(core_path)
+        if hasattr(lib, "retro_get_system_info"):
+            info = RetroSystemInfo()
+            lib.retro_get_system_info(ctypes.byref(info))
+            lib_name = info.library_name.decode("utf-8", errors="ignore").strip() if info.library_name else None
+            lib_ver = info.library_version.decode("utf-8", errors="ignore").strip() if info.library_version else None
+            if lib_name or lib_ver:
+                return lib_name, lib_ver
+    except Exception:
+        pass
+
+    # 2. Fallback: scan binary strings for FBNeo version pattern (e.g., "v1.0.0.03 c4c8b12")
+    try:
+        import re
+        with open(core_path, "rb") as f:
+            data = f.read()
+        match = re.search(rb"(v\d+\.\d+\.\d+\.\d+(?:\s+[0-9a-fA-F]{7,10})?)", data)
+        if match:
+            return None, match.group(1).decode("ascii", errors="ignore")
+    except Exception:
+        pass
+
+    return None, None
+
+
 def get_core_info(core_path: Optional[str]) -> Dict[str, Any]:
-    """Inspect core library file, extract metadata from .info, and compute sha256."""
+    """Inspect core library file, extract metadata from binary & .info, and compute sha256."""
     if not core_path:
         return {"exists": False, "name": "Core belum disetel", "version": "unknown"}
 
@@ -246,6 +289,13 @@ def get_core_info(core_path: Optional[str]) -> Dict[str, Any]:
                     result["version"] = version
                 result["info_file"] = candidate
                 break
+
+    # Query actual compiled-in version directly from the core binary (.dll/.dylib/.so)
+    bin_name, bin_ver = get_core_binary_version(core_path)
+    if bin_name and result["name"] == core_stem:
+        result["name"] = bin_name
+    if bin_ver:
+        result["version"] = bin_ver
 
     return result
 

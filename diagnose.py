@@ -126,22 +126,17 @@ def run_diagnostics(server_url: str = "http://localhost:8080"):
     other_cores = [c for c in cores if c not in arcade_cores]
 
     if cores:
+        from launcher.system_info import get_core_info
         print_ok(f"Ditemukan total {len(cores)} core libretro:")
         for c in arcade_cores:
-            metadata = read_core_metadata(cores[c])
-            if metadata:
-                core_title, core_version, info_path = metadata
-                print(f"      - [Arcade] {c}: {core_title} {core_version} ({cores[c]})")
-                print(f"        Core info: {info_path}")
-            else:
-                print(f"      - [Arcade] {c}: versi tidak ditemukan di file .info ({cores[c]})")
-                print_warn(f"Versi {c} tidak bisa dibaca; bandingkan core yang dipakai di kedua perangkat.")
-            try:
-                print(f"        SHA-256 binary: {sha256_file(cores[c])}")
-            except OSError as e:
-                print_warn(f"Tidak dapat menghitung sidik jari core {c}: {e}")
+            cinfo = get_core_info(cores[c])
+            print(f"      - [Arcade] {c}: {cinfo.get('name')} ({cinfo.get('version')}) [{cores[c]}]")
+            if cinfo.get("info_file"):
+                print(f"        Core info: {cinfo['info_file']}")
+            print(f"        Ukuran   : {cinfo.get('size_str')} | SHA-256: {cinfo.get('sha256')}")
         for c in other_cores:
-            print(f"      - [Console] {c}: {cores[c]}")
+            cinfo = get_core_info(cores[c])
+            print(f"      - [Console] {c}: {cinfo.get('name')} ({cinfo.get('version')}) [{cores[c]}]")
     else:
         print_err("Tidak ada core libretro yang terdeteksi di direktori standar!")
         print("      Saran: Buka RetroArch -> Online Updater -> Core Downloader untuk mengunduh core.")
