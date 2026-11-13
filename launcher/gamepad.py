@@ -55,10 +55,10 @@ class ArcadeGamepadListener:
 
     @staticmethod
     def find_first_joystick() -> Optional[str]:
-        """Detect the first connected joystick device on Linux."""
-        devices = sorted(glob.glob("/dev/input/js*"))
-        if devices and os.path.exists(devices[0]) and os.access(devices[0], os.R_OK):
-            return devices[0]
+        """Detect the first readable connected joystick device on Linux."""
+        for dev in sorted(glob.glob("/dev/input/js*")):
+            if os.path.exists(dev) and os.access(dev, os.R_OK):
+                return dev
         return None
 
     def start(self) -> bool:
@@ -77,21 +77,19 @@ class ArcadeGamepadListener:
 
         elif sys.platform.startswith("linux"):
             path = self.device_path or self.find_first_joystick()
-            if not path:
-                logger.debug("Tidak ada perangkat joystick /dev/input/js* ditemukan di Linux.")
-                self._running = False
-                return False
+            if path:
+                try:
+                    self._js_file = open(path, "rb")
+                    logger.info(f"Arcade gamepad listener attached to {path}")
+                except Exception as e:
+                    logger.debug(f"Could not open joystick {path}: {e}")
+                    self._js_file = None
+            else:
+                logger.info("Belum ada joystick terdeteksi; listener standby menunggu hotplug (/dev/input/js*).")
 
-            try:
-                self._js_file = open(path, "rb")
-                self._thread = threading.Thread(target=self._linux_read_loop, daemon=True)
-                self._thread.start()
-                logger.info(f"Arcade gamepad listener attached to {path}")
-                return True
-            except Exception as e:
-                logger.debug(f"Could not open joystick {path}: {e}")
-                self._running = False
-                return False
+            self._thread = threading.Thread(target=self._linux_read_loop, daemon=True)
+            self._thread.start()
+            return True
         else:
             logger.debug(f"Arcade gamepad listener tidak aktif pada OS: {sys.platform}")
             self._running = False
@@ -144,15 +142,41 @@ class ArcadeGamepadListener:
             except Exception:
                 pass
 
+    def _close_js_file(self) -> None:
+        """Close the active Linux joystick file handle if open."""
+        if self._js_file:
+            try:
+                self._js_file.close()
+            except Exception:
+                pass
+            self._js_file = None
+        self._axis_y_state = 0
+        self._axis_x_state = 0
+
     def _linux_read_loop(self) -> None:
-        """Process incoming 8-byte joystick event packets on Linux."""
+        """Process incoming 8-byte joystick event packets on Linux with hotplug support."""
         last_y_time = 0.0
         last_x_time = 0.0
 
-        while self._running and self._js_file:
+        while self._running:
             if self._paused:
                 time.sleep(0.1)
                 continue
+
+            if not self._js_file:
+                path = self.device_path or self.find_first_joystick()
+                if path:
+                    try:
+                        self._js_file = open(path, "rb")
+                        self._axis_y_state = 0
+                        self._axis_x_state = 0
+                        logger.info(f"Arcade gamepad listener attached to {path} (hotplug)")
+                    except Exception as e:
+                        logger.debug(f"Could not open joystick {path}: {e}")
+                        self._js_file = None
+                if not self._js_file:
+                    time.sleep(0.5)
+                    continue
 
             try:
                 rlist, _, _ = select.select([self._js_file], [], [], 0.1)
@@ -169,7 +193,10 @@ class ArcadeGamepadListener:
 
                 event_data = self._js_file.read(JS_EVENT_SIZE)
                 if not event_data or len(event_data) < JS_EVENT_SIZE:
-                    break
+                    logger.info("Perangkat joystick terputus (EOF). Menunggu hotplug...")
+                    self._close_js_file()
+                    time.sleep(0.5)
+                    continue
 
                 _, value, event_type, number = struct.unpack(JS_EVENT_FORMAT, event_data)
 
@@ -224,8 +251,11 @@ class ArcadeGamepadListener:
                         if number in [num for num, _ in self.mapping.axes_left + self.mapping.axes_right]:
                             self._axis_x_state = 0
 
-            except Exception:
-                break
+            except Exception as e:
+                if self._running:
+                    logger.info(f"Perangkat joystick terputus ({e}). Menunggu hotplug...")
+                self._close_js_file()
+                time.sleep(0.5)
 
     def _windows_read_loop(self) -> None:
         """Poll Windows Gamepads (XInput & WinMM DirectInput) using standard ctypes."""
