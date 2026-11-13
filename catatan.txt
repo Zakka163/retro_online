@@ -7,3 +7,6 @@ vps 2 :192.168.1.71
 217.216.146.15
 
 ssh root@10.233.214.109 "cd /storage/online_netplay && bash deploy/emuelec_install.sh boot"
+
+
+ssh root@10.233.214.109 "bash /storage/online_netplay/deploy/emuelec_install.sh boot && reboot"

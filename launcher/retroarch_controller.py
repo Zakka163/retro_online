@@ -153,10 +153,14 @@ class RetroArchController:
                 pass
         binary = binary or "retroarch"
 
+        main_cfg = "/storage/.config/retroarch/retroarch.cfg"
+        cfg_args = ["-c", main_cfg] if os.path.isfile(main_cfg) else []
+
         if config.mode == "offline":
             cmd = [
                 binary,
                 "-v",
+                *cfg_args,
                 "-L", config.core_path,
                 config.rom_path,
                 "--appendconfig", temp_cfg_path,
@@ -165,6 +169,7 @@ class RetroArchController:
             cmd = [
                 binary,
                 "-v",
+                *cfg_args,
                 "-L", config.core_path,
                 config.rom_path,
                 "--port", str(config.port),

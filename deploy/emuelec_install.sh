@@ -17,6 +17,13 @@ if [ "$MODE" = "boot" ]; then
 
     cat << 'EOF' > "$BOOT_RUNNER"
 #!/bin/bash
+# Pastikan environment EmuELEC (HOME, XDG_CONFIG_HOME, PATH) aktif di unit systemd-run
+export HOME="/storage"
+export XDG_CONFIG_HOME="/storage/.config"
+export XDG_DATA_HOME="/storage/.local/share"
+export XDG_CACHE_HOME="/storage/.cache"
+[ -f /etc/profile ] && . /etc/profile
+
 # Sembunyikan pesan kernel di konsol agar tidak menimpa UI
 dmesg -n 1 >/dev/null 2>&1 || true
 

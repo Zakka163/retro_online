@@ -198,14 +198,43 @@ sudo systemctl enable --now arcade-server
 
 ---
 
-## 📦 Sinkronisasi ke Kabinet EmuELEC
+## 📦 Instalasi & Sinkronisasi ke EmuELEC Baru
+
+Jika ingin memasang di perangkat EmuELEC lain dari awal:
+
+### 1. Kirim kode & ROM dari komputer ke EmuELEC
 
 ```bash
-# Kirim kode launcher + ROM, dan setel config kabinet (ArcadeCab2)
-./sync_to_emuelec.sh <IP_EMUELEC>
+# Salin semua file + ROM ke /storage/online_netplay dan setel player_name=ArcadeCab2
+./sync_to_emuelec.sh <IP_EMUELEC_BARU>
 
-# Atau mirror penuh (menghapus file yang tidak ada di Mac)
-./sync_replace.sh <IP_EMUELEC>
+# Jika butuh mirror penuh (menghapus file lama di EmuELEC yang tidak ada di lokal)
+./sync_replace.sh <IP_EMUELEC_BARU>
+```
+
+> **Catatan:** Jika memakai lebih dari satu kabinet EmuELEC, ubah `"player_name"` di `/storage/online_netplay/config.json` pada masing-masing mesin agar namanya unik (mis. `ArcadeCab2`, `ArcadeCab3`). Dari Mac bisa langsung lewat:
+> ```bash
+> ./set_emuelec_config.sh <IP_EMUELEC> --name ArcadeCab3 --restart
+> # atau mode interaktif: ./set_emuelec_config.sh <IP_EMUELEC>
+> ```
+
+### 2. Pasang mode boot atau menu Ports di EmuELEC
+
+```bash
+# Mode Boot: langsung buka Arcade Online saat STB dinyalakan
+ssh root@<IP_EMUELEC_BARU> "bash /storage/online_netplay/deploy/emuelec_install.sh boot && reboot"
+
+# Atau Mode Ports: tetap masuk EmulationStation, launcher dibuka dari menu Ports
+ssh root@<IP_EMUELEC_BARU> "bash /storage/online_netplay/deploy/emuelec_install.sh ports"
+
+# Untuk menghapus instalasi boot/ports:
+ssh root@<IP_EMUELEC_BARU> "bash /storage/online_netplay/deploy/emuelec_install.sh remove"
+```
+
+### 3. (Opsional) Setup SSH key untuk auto-upload log ke VPS
+
+```bash
+ssh -t root@<IP_EMUELEC_BARU> "cd /storage/online_netplay && ./setup_log_ssh.sh"
 ```
 
 ---
