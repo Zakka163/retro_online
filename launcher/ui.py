@@ -196,42 +196,80 @@ class ArcadeTUI:
         return key in self.mapping.keys_back
 
     def draw_box(self, title: str, lines: List[str], footer: str = "") -> None:
-        """Draw a retro arcade bordered window."""
+        """Draw a clean, color-highlighted retro arcade bordered window."""
         if not self.curses_available or not self.stdscr:
             return
 
         self.stdscr.erase()
         h, w = self.stdscr.getmaxyx()
-        box_w = min(w - 4, 60)
-        box_h = min(h - 4, len(lines) + 8)
+        if h < 8 or w < 24:
+            self.stdscr.refresh()
+            return
+
+        box_w = min(w - 4, 74)
+        inner_w = box_w - 4
+        max_content = max(1, h - 6)
+        visible_lines = lines[:max_content]
+        box_h = min(h - 2, len(visible_lines) + 6)
         start_y = max(1, (h - box_h) // 2)
         start_x = max(1, (w - box_w) // 2)
 
-        # Draw border
-        border = "+" + "-" * (box_w - 2) + "+"
-        self.stdscr.addstr(start_y, start_x, border, self.curses.color_pair(1))
+        # Top & Bottom borders with '+' corners
+        horiz = "+" + "-" * (box_w - 2) + "+"
+        try:
+            self.stdscr.addstr(start_y, start_x, horiz, self.curses.color_pair(1))
+            self.stdscr.addstr(start_y + box_h - 1, start_x, horiz, self.curses.color_pair(1))
+        except Exception:
+            pass
 
-        # Title
-        t_str = f" {title.upper()} "
-        t_x = start_x + (box_w - len(t_str)) // 2
-        self.stdscr.addstr(start_y, t_x, t_str, self.curses.color_pair(1))
+        # Title centered on top border
+        t_str = f" {title.upper()} "[:box_w - 4]
+        t_x = start_x + max(1, (box_w - len(t_str)) // 2)
+        try:
+            self.stdscr.addstr(start_y, t_x, t_str, self.curses.color_pair(1) | self.curses.A_BOLD)
+        except Exception:
+            pass
 
-        # Content lines
+        # Side borders + padded content lines
         curr_y = start_y + 2
-        for line in lines:
+        for y in range(start_y + 1, start_y + box_h - 1):
+            try:
+                self.stdscr.addstr(y, start_x, "|", self.curses.color_pair(1))
+                self.stdscr.addstr(y, start_x + box_w - 1, "|", self.curses.color_pair(1))
+            except Exception:
+                pass
+
+        for line in visible_lines:
             if curr_y >= start_y + box_h - 2:
                 break
-            padding = " " * max(0, box_w - 4 - len(line))
-            self.stdscr.addstr(curr_y, start_x + 2, f"{line}{padding}"[:box_w - 4])
+            text = str(line)[:inner_w]
+            padded = text.ljust(inner_w)
+
+            attr = self.curses.color_pair(2)
+            stripped = text.lstrip()
+            if text.startswith("> "):
+                attr = self.curses.color_pair(3) | self.curses.A_BOLD
+            elif stripped.startswith("---") or stripped.startswith("==="):
+                attr = self.curses.color_pair(5)
+            elif "Offline" in text or "PERINGATAN" in text or "TERPUTUS" in text:
+                attr = self.curses.color_pair(4) | self.curses.A_BOLD
+            elif text.startswith("Sinyal") or text.startswith("Layanan") or text.startswith("Room Aktif"):
+                attr = self.curses.color_pair(5)
+
+            try:
+                self.stdscr.addstr(curr_y, start_x + 2, padded, attr)
+            except Exception:
+                pass
             curr_y += 1
 
-        # Footer
+        # Footer centered on bottom border
         if footer:
-            f_str = f" {footer} "
-            f_x = start_x + (box_w - len(f_str)) // 2
-            self.stdscr.addstr(start_y + box_h - 1, f_x, f_str, self.curses.color_pair(5))
-        else:
-            self.stdscr.addstr(start_y + box_h - 1, start_x, border, self.curses.color_pair(1))
+            f_str = f" {footer} "[:box_w - 4]
+            f_x = start_x + max(1, (box_w - len(f_str)) // 2)
+            try:
+                self.stdscr.addstr(start_y + box_h - 1, f_x, f_str, self.curses.color_pair(5))
+            except Exception:
+                pass
 
         self.stdscr.refresh()
 
@@ -261,11 +299,15 @@ class ArcadeTUI:
         self.draw_box("KONEKSI NETPLAY", lines, "Menyiapkan pertandingan...")
 
     def show_message(self, title: str, message: str, wait_seconds: float = 2.0) -> None:
-        """Display an informational dialog."""
+        """Display an informational dialog with clean word wrapping."""
+        import textwrap
         logger.info(f"UI Dialog [{title}]: {message}")
-        lines = ["", message, ""]
+        wrapped: List[str] = [""]
+        for para in str(message).splitlines() or [""]:
+            wrapped.extend(textwrap.wrap(para, width=64) or [""])
+        wrapped.append("")
         if self.curses_available:
-            self.draw_box(title, lines, "Tekan Sembarang Tombol")
+            self.draw_box(title, wrapped, "Mohon tunggu...")
             time.sleep(wait_seconds)
         else:
             print(f"\n[{title.upper()}] {message}")

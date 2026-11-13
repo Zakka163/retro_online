@@ -178,6 +178,23 @@ class RetroArchInputMapping:
     axes_left: List[Tuple[int, int]] = field(default_factory=list)
     axes_right: List[Tuple[int, int]] = field(default_factory=list)
 
+    # RetroArch Hotkey & Exit buttons (for display/diagnostics)
+    hotkey_btn: Optional[str] = None
+    exit_btn: Optional[str] = None
+    button_names: Dict[int, str] = field(default_factory=dict)
+
+    def get_button_name(self, btn_idx: int) -> str:
+        """Return a human-readable label for a hardware button index."""
+        if btn_idx in self.button_names:
+            return self.button_names[btn_idx]
+        defaults = {
+            0: "A", 1: "B", 2: "X", 3: "Y",
+            4: "L1", 5: "R1", 6: "L2", 7: "R2",
+            8: "SELECT", 9: "START", 10: "L3", 11: "R3",
+            12: "HOME", 13: "ATAS", 14: "BAWAH", 15: "KIRI", 16: "KANAN",
+        }
+        return defaults.get(btn_idx, f"Tombol {chr(65 + (btn_idx % 26))}")
+
 
 def load_retroarch_mapping(retroarch_bin: Optional[str] = None,
                            custom_cfg_path: Optional[str] = None) -> RetroArchInputMapping:
@@ -280,6 +297,32 @@ def load_retroarch_mapping(retroarch_bin: Optional[str] = None,
                 parsed_ax = _parse_axis_str(val)
                 if parsed_ax and parsed_ax not in axis_list:
                     axis_list.insert(0, parsed_ax)
+
+        # Map human-readable button labels from retroarch.cfg
+        for cfg_key, label in [
+            ("input_player1_a_btn", "A"),
+            ("input_player1_b_btn", "B"),
+            ("input_player1_x_btn", "X"),
+            ("input_player1_y_btn", "Y"),
+            ("input_player1_l_btn", "L1"),
+            ("input_player1_r_btn", "R1"),
+            ("input_player1_l2_btn", "L2"),
+            ("input_player1_r2_btn", "R2"),
+            ("input_player1_l3_btn", "L3"),
+            ("input_player1_r3_btn", "R3"),
+            ("input_player1_select_btn", "SELECT"),
+            ("input_player1_start_btn", "START"),
+            ("input_player1_up_btn", "ATAS"),
+            ("input_player1_down_btn", "BAWAH"),
+            ("input_player1_left_btn", "KIRI"),
+            ("input_player1_right_btn", "KANAN"),
+        ]:
+            val = cfg_data.get(cfg_key)
+            if val and val.isdigit():
+                mapping.button_names[int(val)] = label
+
+        mapping.hotkey_btn = cfg_data.get("input_enable_hotkey_btn")
+        mapping.exit_btn = cfg_data.get("input_exit_emulator_btn")
 
     return mapping
 

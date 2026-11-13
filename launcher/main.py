@@ -21,7 +21,7 @@ from typing import Optional, Dict, Any, List
 from catalog.validator import CatalogValidator, GameManifest
 from .retroarch_controller import RetroArchController, RetroArchLaunchConfig
 from .client_api import ArcadeClientAPI
-from .connection_manager import ConnectionManager, ConnectionProgressStep, ERROR_MESSAGES
+from .connection_manager import ConnectionManager, ConnectionProgressStep, ERROR_MESSAGES, get_network_indicator_text
 from .ui import ArcadeTUI, ArcadeCLI
 from .logger import setup_launcher_logging, get_recent_logs
 from .session_supervisor import SessionSupervisor
@@ -577,19 +577,22 @@ class ArcadeLauncherApp:
         needs_redraw = True
         last_render_time = 0.0
 
-        # Prime asynchronous health check in background
+        # Prime asynchronous health & latency checks in background
         self.api.get_cached_health()
+        self.api.get_cached_latency_ms()
 
         def build_menu_items():
             games = self.manifest.list_games()
             items = []
             if not games:
-                items.append(("[ ! ] Tidak ada ROM arcade terdeteksi", "empty_hint"))
+                items.append(("Tidak ada ROM arcade terdeteksi", "empty_hint"))
             else:
                 for g in games:
-                    status_icon = "✓" if g.get("status") == "ready" or g.get("scanned_rom_path") else " "
-                    items.append((f"[{status_icon}] {g['display_name']}", g))
-            items.append(("🔄 PINDAI", "rescan"))
+                    ready = g.get("status") == "ready" or g.get("scanned_rom_path")
+                    suffix = "" if ready else " (Belum Siap)"
+                    items.append((f"{g['display_name']}{suffix}", g))
+            items.append(("Pindai Ulang ROM", "rescan"))
+            items.append(("Cek Mapping Joystick", "check_joystick"))
             return items
 
         menu_items = build_menu_items()
@@ -598,25 +601,35 @@ class ArcadeLauncherApp:
             if selected_idx >= len(menu_items):
                 selected_idx = max(0, len(menu_items) - 1)
 
-            # Check server status non-blocking
+            # Check server status & latency non-blocking
             online, _ = self.api.get_cached_health(max_age=5.0)
-            status_text = "Online" if online else "Offline (Periksa Server)"
+            latency = self.api.get_cached_latency_ms(max_age=5.0) if online else -1.0
+            if online and latency > 0:
+                q = "Sangat Baik" if latency < 60 else ("Baik" if latency < 120 else ("Sedang" if latency < 200 else "Lambat"))
+                status_text = f"Online | Ping: {latency:.0f} ms ({q})"
+            elif online:
+                status_text = "Online"
+            else:
+                status_text = "Offline (Periksa Server)"
+            net_text = get_network_indicator_text()
 
             now = time.time()
             if needs_redraw or (now - last_render_time >= 1.0):
-                lines = ["PILIH GAME (✓ = Siap Main):"]
-                for idx, (label, _) in enumerate(menu_items):
-                    prefix = "> [ " if idx == selected_idx else "  [ "
-                    suffix = " ]"
-                    lines.append(f"{prefix}{label}{suffix}")
+                lines = ["PILIH GAME:", ""]
+                for idx, (label, data) in enumerate(menu_items):
+                    if idx > 0 and data == "rescan":
+                        lines.append("-" * 44)
+                    prefix = "> " if idx == selected_idx else "  "
+                    lines.append(f"{prefix}{label}")
 
                 lines.append("")
-                lines.append(f"Status Layanan: {status_text}")
+                lines.append(f"Sinyal  : {net_text}")
+                lines.append(f"Layanan : {status_text}")
 
                 self.ui.draw_box(
                     "ARCADE ONLINE",
                     lines,
-                    "UP/DOWN: Pilih | ENTER: Buka | ESC: Keluar"
+                    "ATAS/BAWAH: Pilih | ENTER: Buka | BACK: Keluar"
                 )
                 last_render_time = now
                 needs_redraw = False
@@ -645,16 +658,96 @@ class ArcadeLauncherApp:
                 elif selected_data == "empty_hint":
                     logger.info("Menu Utama: Petunjuk penempatan ROM ditampilkan.")
                     self.ui.show_message("PETUNJUK", "Letakkan file ROM (.zip) di folder roms, lalu pilih PINDAI.", wait_seconds=2.5)
+                elif selected_data == "check_joystick":
+                    self._check_joystick_loop()
                 elif isinstance(selected_data, dict):
                     logger.info(f"Menu Utama: Pengguna memilih game '{selected_data.get('display_name')}' ({selected_data.get('game_id')})")
                     self._game_action_loop(selected_data)
 
+    def _check_joystick_loop(self) -> None:
+        """Layar Diagnostik: Cek Mapping & Uji Input Joystick Secara Langsung."""
+        mapping = self.ui.mapping
+        gamepad = self.ui.gamepad
+        last_event_ts = 0.0
+        last_back_press = 0.0
+        last_key_info = "Belum ada tombol ditekan..."
+        needs_redraw = True
+        last_render_time = 0.0
+
+        cfg_src = mapping.cfg_file_used or "Default Bawaan"
+        enter_labels = list(dict.fromkeys(mapping.get_button_name(b) for b in sorted(mapping.buttons_enter)))
+        back_labels = list(dict.fromkeys(mapping.get_button_name(b) for b in sorted(mapping.buttons_back)))
+        enter_btns = ", ".join(enter_labels) or "-"
+        back_btns = ", ".join(back_labels) or "-"
+        if mapping.hotkey_btn and mapping.exit_btn and mapping.hotkey_btn.isdigit() and mapping.exit_btn.isdigit():
+            hk_name = mapping.get_button_name(int(mapping.hotkey_btn))
+            ex_name = mapping.get_button_name(int(mapping.exit_btn))
+            retro_exit = f"{hk_name} + {ex_name}"
+        else:
+            retro_exit = "SELECT + START (sesuai setting RetroArch)"
+
+        while True:
+            now = time.time()
+            raw = gamepad.last_raw_event if gamepad else None
+            if raw and raw.get("time", 0.0) > last_event_ts:
+                last_event_ts = raw["time"]
+                act_label = raw.get("action") or "Tidak ter-mapping"
+                if raw.get("kind") == "TOMBOL":
+                    btn_label = mapping.get_button_name(raw["number"])
+                    last_key_info = f"Tombol {btn_label}  ->  Aksi: {act_label}"
+                else:
+                    dir_label = act_label if raw.get("action") else "Gerak Stik"
+                    last_key_info = f"Stik / D-Pad ({dir_label})  ->  Aksi: {act_label}"
+                needs_redraw = True
+
+            if needs_redraw or (now - last_render_time >= 0.5):
+                dev_status = f"Terhubung ({gamepad.active_device})" if (gamepad and gamepad.active_device) else "Standby (Menunggu colok joystick...)"
+                lines = [
+                    f"Perangkat : {dev_status}",
+                    f"Sumber Cfg: {cfg_src}",
+                    "",
+                    f"Tombol ENTER / Pilih : [{enter_btns}]",
+                    f"Tombol BACK / Batal  : [{back_btns}]",
+                    f"Keluar Game RetroArch: {retro_exit}",
+                    "",
+                    "--- TES INPUT LANGSUNG ---",
+                    f"Input Terakhir: {last_key_info}",
+                    "",
+                    "Tekan tombol apa saja di joystick untuk tes.",
+                ]
+                self.ui.draw_box(
+                    "CEK MAPPING JOYSTICK",
+                    lines,
+                    "Tekan BACK 2x cepat (atau ESC) untuk kembali"
+                )
+                last_render_time = now
+                needs_redraw = False
+
+            key = self.ui.get_key()
+            if key == -1:
+                continue
+
+            if key in (27, ord('q'), ord('Q')):
+                # Bedakan ESC keyboard (atau BACK dari gamepad yang memetakan ke 27)
+                is_gamepad_back = raw and (now - raw.get("time", 0.0) < 0.25) and raw.get("action") == "BACK"
+                if not is_gamepad_back:
+                    break
+                if (now - last_back_press) <= 1.5:
+                    break
+                last_back_press = now
+                btn_label = mapping.get_button_name(raw["number"])
+                last_key_info = f"Tombol {btn_label} -> Aksi: BACK (tekan sekali lagi untuk keluar)"
+                needs_redraw = True
+            elif not raw or (now - raw.get("time", 0.0) >= 0.25):
+                last_key_info = f"Tombol Keyboard ({chr(key) if 32 <= key <= 126 else 'Khusus'})"
+                needs_redraw = True
+
     def _game_action_loop(self, game: Dict[str, Any]) -> None:
         """Layar 2: Pilih Mode Permainan (Offline / Online)."""
         options = [
-            ("🕹️  MAIN OFFLINE", "offline"),
-            ("🌐 MAIN ONLINE", "online"),
-            ("⬅️  KEMBALI", "back"),
+            ("Main Offline", "offline"),
+            ("Main Online", "online"),
+            ("Kembali", "back"),
         ]
         selected_idx = 0
         needs_redraw = True
@@ -675,8 +768,8 @@ class ArcadeLauncherApp:
                     "PILIH MODE PERMAINAN:"
                 ]
                 for idx, (label, _) in enumerate(options):
-                    prefix = "> [ " if idx == selected_idx else "  [ "
-                    lines.append(f"{prefix}{label} ]")
+                    prefix = "> " if idx == selected_idx else "  "
+                    lines.append(f"{prefix}{label}")
 
                 lines.append("")
                 lines.append(f"Room Online Aktif: {len(rooms)}")
@@ -684,7 +777,7 @@ class ArcadeLauncherApp:
                 self.ui.draw_box(
                     game["display_name"],
                     lines,
-                    "UP/DOWN: Pilih | ENTER: Lanjut | ESC: Kembali"
+                    "ATAS/BAWAH: Pilih | ENTER: Lanjut | BACK: Kembali"
                 )
                 last_render_time = now
                 needs_redraw = False
@@ -733,11 +826,14 @@ class ArcadeLauncherApp:
                     "PILIHAN MENU:"
                 ]
                 for idx, act in enumerate(actions):
-                    prefix = "> [ " if idx == selected_idx else "  [ "
-                    lines.append(f"{prefix}{act} ]")
+                    prefix = "> " if idx == selected_idx else "  "
+                    lines.append(f"{prefix}{act.title()}")
 
                 lines.append("")
                 lines.append(f"Room Aktif: {len(rooms)}")
+                lat = self.api.get_cached_latency_ms(max_age=5.0)
+                lat_txt = f" | Ping: {lat:.0f} ms" if lat > 0 else ""
+                lines.append(f"Sinyal    : {get_network_indicator_text()}{lat_txt}")
 
                 self.ui.draw_box(
                     f"{game['display_name']} [ONLINE]",

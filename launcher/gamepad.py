@@ -52,6 +52,8 @@ class ArcadeGamepadListener:
         # State tracking to prevent repeated triggers
         self._axis_y_state = 0  # -1 = UP, 0 = CENTER, 1 = DOWN
         self._axis_x_state = 0  # -1 = LEFT, 0 = CENTER, 1 = RIGHT
+        self.active_device: Optional[str] = None
+        self.last_raw_event: Optional[dict] = None
 
     @staticmethod
     def find_first_joystick() -> Optional[str]:
@@ -80,10 +82,12 @@ class ArcadeGamepadListener:
             if path:
                 try:
                     self._js_file = open(path, "rb")
+                    self.active_device = path
                     logger.info(f"Arcade gamepad listener attached to {path}")
                 except Exception as e:
                     logger.debug(f"Could not open joystick {path}: {e}")
                     self._js_file = None
+                    self.active_device = None
             else:
                 logger.info("Belum ada joystick terdeteksi; listener standby menunggu hotplug (/dev/input/js*).")
 
@@ -150,8 +154,25 @@ class ArcadeGamepadListener:
             except Exception:
                 pass
             self._js_file = None
+        self.active_device = None
         self._axis_y_state = 0
         self._axis_x_state = 0
+
+    def _resolve_button_action(self, number: int) -> Optional[str]:
+        """Map a hardware button index to a launcher action name."""
+        if number in self.mapping.buttons_enter:
+            return "ENTER"
+        if number in self.mapping.buttons_back:
+            return "BACK"
+        if number in self.mapping.buttons_up or number in (13, 544):
+            return "UP"
+        if number in self.mapping.buttons_down or number in (14, 545):
+            return "DOWN"
+        if number in self.mapping.buttons_left or number in (15, 546):
+            return "LEFT"
+        if number in self.mapping.buttons_right or number in (16, 547):
+            return "RIGHT"
+        return None
 
     def _linux_read_loop(self) -> None:
         """Process incoming 8-byte joystick event packets on Linux with hotplug support."""
@@ -168,12 +189,14 @@ class ArcadeGamepadListener:
                 if path:
                     try:
                         self._js_file = open(path, "rb")
+                        self.active_device = path
                         self._axis_y_state = 0
                         self._axis_x_state = 0
                         logger.info(f"Arcade gamepad listener attached to {path} (hotplug)")
                     except Exception as e:
                         logger.debug(f"Could not open joystick {path}: {e}")
                         self._js_file = None
+                        self.active_device = None
                 if not self._js_file:
                     time.sleep(0.5)
                     continue
@@ -207,18 +230,16 @@ class ArcadeGamepadListener:
                 if event_type & JS_EVENT_BUTTON:
                     # value: 1 = pressed, 0 = released
                     if value == 1:
-                        if number in self.mapping.buttons_enter:
-                            self._trigger("ENTER")
-                        elif number in self.mapping.buttons_back:
-                            self._trigger("BACK")
-                        elif number in self.mapping.buttons_up or number in (13, 544):
-                            self._trigger("UP")
-                        elif number in self.mapping.buttons_down or number in (14, 545):
-                            self._trigger("DOWN")
-                        elif number in self.mapping.buttons_left or number in (15, 546):
-                            self._trigger("LEFT")
-                        elif number in self.mapping.buttons_right or number in (16, 547):
-                            self._trigger("RIGHT")
+                        action = self._resolve_button_action(number)
+                        self.last_raw_event = {
+                            "kind": "TOMBOL",
+                            "number": number,
+                            "value": value,
+                            "action": action,
+                            "time": time.time(),
+                        }
+                        if action:
+                            self._trigger(action)
 
                 elif event_type & JS_EVENT_AXIS:
                     now = time.time()
@@ -226,6 +247,21 @@ class ArcadeGamepadListener:
                     matched_down = any(num == number and (sign == 1 and value > 16000 or sign == -1 and value < -16000) for num, sign in self.mapping.axes_down)
                     matched_left = any(num == number and (sign == -1 and value < -16000 or sign == 1 and value > 16000) for num, sign in self.mapping.axes_left)
                     matched_right = any(num == number and (sign == 1 and value > 16000 or sign == -1 and value < -16000) for num, sign in self.mapping.axes_right)
+
+                    if abs(value) > 16000:
+                        ax_action = (
+                            "UP" if matched_up else
+                            "DOWN" if matched_down else
+                            "LEFT" if matched_left else
+                            "RIGHT" if matched_right else None
+                        )
+                        self.last_raw_event = {
+                            "kind": "AXIS",
+                            "number": number,
+                            "value": value,
+                            "action": ax_action,
+                            "time": now,
+                        }
 
                     if matched_up and self._axis_y_state != -1:
                         self._axis_y_state = -1

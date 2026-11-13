@@ -84,6 +84,50 @@ def get_all_local_ips() -> List[str]:
     return ips or ["127.0.0.1"]
 
 
+def get_network_indicator_text() -> str:
+    """Return a concise, non-blocking network & WiFi signal indicator string."""
+    ip = get_local_ip()
+    if os.path.isfile("/proc/net/wireless"):
+        try:
+            with open("/proc/net/wireless", "r", encoding="utf-8", errors="ignore") as f:
+                lines = f.read().splitlines()
+            for line in lines[2:]:
+                if ":" not in line:
+                    continue
+                _, rest = line.split(":", 1)
+                parts = rest.split()
+                if len(parts) >= 3:
+                    link = float(parts[1].rstrip("."))
+                    level = float(parts[2].rstrip("."))
+                    if level < 0:
+                        pct = max(0, min(100, int((level + 90.0) * 100.0 / 45.0)))
+                        detail = f"{int(level)} dBm"
+                    elif 0 < link <= 70:
+                        pct = max(0, min(100, int(link * 100.0 / 70.0)))
+                        detail = f"{pct}%"
+                    else:
+                        pct = max(0, min(100, int(link)))
+                        detail = f"{pct}%"
+
+                    if pct >= 75:
+                        label = "Kuat"
+                    elif pct >= 50:
+                        label = "Sedang"
+                    elif pct >= 25:
+                        label = "Lemah"
+                    else:
+                        label = "Sangat Lemah"
+
+                    ip_str = f" | IP: {ip}" if ip != "127.0.0.1" else ""
+                    return f"{label} ({detail}){ip_str}"
+        except Exception:
+            pass
+
+    if ip and ip != "127.0.0.1":
+        return f"Terhubung (IP: {ip})"
+    return "Tidak Terhubung"
+
+
 class ConnectionManager:
     """Coordinates direct P2P connectivity and Relay fallback."""
 
