@@ -136,10 +136,10 @@ class RelayServer:
         """Process authentication handshake: ARCADE_RELAY <session_id> <token> <ROLE>."""
         try:
             conn.settimeout(10.0)
-            # Read handshake line terminated by newline
+            # Read handshake line terminated by newline, 1 byte at a time to preserve any trailing payload
             data = b""
             while b"\n" not in data and len(data) < 256:
-                chunk = conn.recv(64)
+                chunk = conn.recv(1)
                 if not chunk:
                     break
                 data += chunk
@@ -358,6 +358,7 @@ class LocalRelayBridge:
         self.disconnect_event = threading.Event()
         self.ready_event = threading.Event()
         self._client_listen_sock: Optional[socket.socket] = None
+        self._pending_from_relay = bytearray()
 
     def start(self) -> None:
         self._running = True
@@ -387,27 +388,35 @@ class LocalRelayBridge:
 
     def _connect_relay_socket(self, timeout: float = 8.0) -> Optional[socket.socket]:
         """Establish outbound socket to Relay Server and complete authentication."""
+        sock = None
         try:
+            deadline = time.time() + timeout
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(timeout)
+            sock.settimeout(min(8.0, max(0.5, timeout)))
             sock.connect((self.relay_host, self.relay_port))
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
             handshake = f"ARCADE_RELAY {self.session_id} {self.token} {self.role}\n"
             sock.sendall(handshake.encode("utf-8"))
 
-            sock.settimeout(timeout)
             response = b""
-            while b"\n" not in response and not self._stop_event.is_set():
+            while b"\n" not in response and len(response) < 256 and not self._stop_event.is_set():
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    break
+                sock.settimeout(min(2.0, max(0.5, remaining)))
                 try:
-                    chunk = sock.recv(64)
+                    chunk = sock.recv(1)
                     if not chunk:
                         break
                     response += chunk
                 except (socket.timeout, BlockingIOError):
                     continue
 
-            if b"OK CONNECTED" in response:
+            header_line, sep, remainder = response.partition(b"\n")
+            if b"OK CONNECTED" in header_line:
+                if remainder:
+                    self._pending_from_relay.extend(remainder)
                 try:
                     sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                     sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
@@ -426,6 +435,11 @@ class LocalRelayBridge:
                 return None
         except Exception as e:
             logger.debug(f"[LocalRelayBridge] Gagal terhubung ke relay: {e}")
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
             return None
 
     def _run_bridge(self) -> None:
@@ -433,9 +447,19 @@ class LocalRelayBridge:
         relay_sock = None
         local_sock = None
         try:
-            # 1. Connect to Relay Server (wait up to 60s initially for opponent)
+            # 1. Connect to Relay Server (wait up to 60s initially for opponent, with transient error retries)
             logger.info(f"[LocalRelayBridge] Menghubungkan ke Relay VPS {self.relay_host}:{self.relay_port}...")
-            relay_sock = self._connect_relay_socket(timeout=60.0)
+            init_deadline = time.time() + 60.0
+            while not self._stop_event.is_set():
+                remaining = init_deadline - time.time()
+                if remaining <= 0:
+                    break
+                relay_sock = self._connect_relay_socket(timeout=remaining)
+                if relay_sock or self._stop_event.is_set():
+                    break
+                if (init_deadline - time.time()) <= 0.5:
+                    break
+                time.sleep(0.5)
             if not relay_sock:
                 logger.warning("[LocalRelayBridge] Handshake relay gagal atau ditutup.")
                 return
@@ -497,6 +521,10 @@ class LocalRelayBridge:
             except OSError:
                 pass
             local_sock.settimeout(30.0)
+
+            if self._pending_from_relay:
+                local_sock.sendall(bytes(self._pending_from_relay))
+                self._pending_from_relay.clear()
 
             sockets = [relay_sock, local_sock]
 
@@ -582,6 +610,9 @@ class LocalRelayBridge:
                                 new_relay = self._connect_relay_socket(timeout=3.0)
                                 if new_relay:
                                     relay_sock = new_relay
+                                    if self._pending_from_relay:
+                                        local_sock.sendall(bytes(self._pending_from_relay))
+                                        self._pending_from_relay.clear()
                                     sockets = [relay_sock, local_sock]
                                     logger.info("[LocalRelayBridge] Berhasil RECONNECT ke Relay VPS! Melanjutkan permainan...")
                                     break

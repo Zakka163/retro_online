@@ -237,9 +237,8 @@ Untuk EmuELEC, salin skripnya dulu:
 
 ```bash
 scp setup_log_ssh.sh root@<IP_EMUELEC>:/storage/online_netplay/
-ssh root@<IP_EMUELEC> "cd /storage/online_netplay && ./setup_log_ssh.sh"
+ssh -t root@<IP_EMUELEC> "cd /storage/online_netplay && ./setup_log_ssh.sh"
 ```
-
 ### 2. Uji kirim
 
 ```bash
