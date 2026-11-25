@@ -54,7 +54,7 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$SCRIPT_DIR"
 
 if [ -n "$NEW_VERSION" ]; then
@@ -88,7 +88,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 BUNDLE_PATH="${TMP_DIR}/${BUNDLE_NAME}"
 MANIFEST_PATH="${TMP_DIR}/manifest.json"
 
-TARGETS=(launcher catalog server deploy diagnose.py setup_log_ssh.sh setup_log_ssh.py)
+TARGETS=(launcher catalog server deploy scripts)
 if [ "$INCLUDE_ROMS" = true ] && [ -d "roms" ]; then
     TARGETS+=(roms)
 fi

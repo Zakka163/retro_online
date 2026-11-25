@@ -6,7 +6,7 @@ set -euo pipefail
 EMUELEC_IP="${1:-10.90.147.109}"
 EMUELEC_USER="${2:-root}"
 TARGET_DIR="/storage/online_netplay"
-SOURCE_DIR="$(pwd -P)"
+SOURCE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 if [[ ! -d "$SOURCE_DIR/launcher" ]]; then
   echo "Error: $SOURCE_DIR does not look like the project directory (launcher/ is missing)." >&2

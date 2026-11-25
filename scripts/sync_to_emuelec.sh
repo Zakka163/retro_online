@@ -2,6 +2,9 @@
 # Script Sinkronisasi Otomatis Mac -> EmuELEC Arcade Cabinet
 # Menyelaraskan seluruh kode launcher, konfigurasi anti-desync, dan file ROM
 
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$SCRIPT_DIR"
+
 EMUELEC_IP="${1:-10.14.183.109}"
 EMUELEC_USER="${2:-root}"
 TARGET_DIR="/storage/online_netplay"
@@ -29,7 +32,7 @@ fi
 # 2. Sinkronkan kode python launcher, catalog, server, dan skrip utilitas
 echo "[2/5] Mengirim kode launcher terbaru..."
 rsync -avz -e "ssh ${SSH_OPTS}" --exclude '.git' --exclude '__pycache__' --exclude 'logssh' --exclude '*.log' \
-  launcher catalog server deploy diagnose.py setup_log_ssh.sh setup_log_ssh.py \
+  launcher catalog server deploy scripts \
   "${EMUELEC_USER}@${EMUELEC_IP}:${TARGET_DIR}/"
 
 # 3. Sinkronkan file ROM agar 100% identik bit-per-bit
