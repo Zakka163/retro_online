@@ -49,7 +49,9 @@ class ArcadeLauncherApp:
                  preferred_arcade_cores: Optional[List[str]] = None,
                  local_roms_only: bool = False,
                  log_file: str = "arcade_launcher.log",
-                 log_uploader_cfg: Optional[Dict[str, Any]] = None):
+                 log_uploader_cfg: Optional[Dict[str, Any]] = None,
+                 auto_update: bool = True,
+                 config_path: str = "config.json"):
         self.server_url = server_url
         self.player_name = player_name
         self.dry_run = dry_run
@@ -63,6 +65,8 @@ class ArcadeLauncherApp:
         self.preferred_arcade_cores = preferred_arcade_cores
         self.local_roms_only = local_roms_only
         self.log_file = log_file
+        self.auto_update = auto_update
+        self.config_path = config_path
 
         from launcher.log_uploader import RemoteLogUploader
         lu_cfg = log_uploader_cfg or {}
@@ -101,6 +105,28 @@ class ArcadeLauncherApp:
         self.conn_mgr = ConnectionManager(api=self.api)
         self.ra_controller = RetroArchController(retroarch_bin=self.retroarch_bin)
         self.ui = ArcadeTUI()
+
+        from .device_reporter import DeviceReporter
+        def _on_remote_rename(new_name: str) -> None:
+            self.player_name = new_name
+            if hasattr(self, "log_uploader") and self.log_uploader:
+                self.log_uploader.machine_name = new_name
+
+        def _on_remote_restart() -> None:
+            try:
+                self.ui.restore_terminal()
+            except Exception:
+                pass
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+
+        self.device_reporter = DeviceReporter(
+            server_url=self.server_url,
+            player_name=self.player_name,
+            config_path=self.config_path,
+            get_games_fn=lambda: [g for g in self.manifest.list_games() if g.get("status") == "ready"],
+            on_rename_fn=_on_remote_rename,
+            on_restart_fn=_on_remote_restart,
+        )
 
         import socket
         import platform
@@ -465,11 +491,57 @@ class ArcadeLauncherApp:
             return
 
         try:
+            self._check_and_apply_startup_update()
+            if not self.dry_run and hasattr(self, "device_reporter"):
+                self.device_reporter.start()
             self._main_menu_loop()
         finally:
+            if hasattr(self, "device_reporter"):
+                self.device_reporter.stop()
             self.ui.restore_terminal()
             if hasattr(self, "log_uploader") and self.log_uploader and self.log_uploader.enabled:
                 self.log_uploader.upload_sync("launcher_exit")
+
+    def _check_and_apply_startup_update(self) -> None:
+        """Check VPS for a newer launcher bundle and apply it cleanly before menu."""
+        if not self.auto_update or self.dry_run:
+            return
+        if os.environ.get("ARCADE_NO_AUTO_UPDATE") == "1":
+            return
+        try:
+            from .system_info import LAUNCHER_VERSION
+            from .updater import check_for_update, download_and_apply_update, get_effective_version, sync_roms_from_server
+
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+            roms_dir = self.custom_rom_dirs[0] if self.custom_rom_dirs else os.path.join(project_root, "roms")
+            cur_ver = get_effective_version(LAUNCHER_VERSION, project_root)
+
+            manifest = check_for_update(self.server_url, cur_ver, timeout=3.5)
+            if manifest:
+                new_ver = manifest.get("version", "baru")
+                self.ui.show_message(
+                    "PEMBARUAN TERSEDIA",
+                    f"Mengunduh pembaruan v{new_ver} dari server...",
+                    wait_seconds=0.3
+                )
+                ok, msg = download_and_apply_update(self.server_url, manifest, project_root)
+                if ok:
+                    sync_roms_from_server(self.server_url, roms_dir)
+                    self.ui.show_message(
+                        "PEMBARUAN SELESAI",
+                        f"Berhasil update ke v{new_ver}.\nMemulai ulang launcher...",
+                        wait_seconds=1.2
+                    )
+                    self.ui.restore_terminal()
+                    os.execv(sys.executable, [sys.executable] + sys.argv)
+                else:
+                    logger.warning(f"Auto-update dilewati: {msg}")
+
+            dl, rm = sync_roms_from_server(self.server_url, roms_dir)
+            if dl > 0 or rm > 0:
+                self.manifest.scan()
+        except Exception as e:
+            logger.debug(f"Auto-update dilewati: {e}")
 
     def _run_cli_interactive_menu(self) -> None:
         """Interactive text-based menu when curses is not available (e.g. Windows without windows-curses)."""
@@ -1275,6 +1347,8 @@ def main() -> None:
 
     parser.add_argument("--upload-logs", action="store_true",
                         help="Upload log file to VPS log server immediately and exit")
+    parser.add_argument("--no-update", action="store_true",
+                        help="Skip startup auto-update check")
 
     args = parser.parse_args()
 
@@ -1378,6 +1452,8 @@ def main() -> None:
     if args.all_rom_dirs:
         local_roms_only = False
 
+    auto_update = cfg.get("client", {}).get("auto_update", True) and not args.no_update
+
     app = ArcadeLauncherApp(
         server_url=server_url,
         retroarch_bin=ra_bin,
@@ -1392,7 +1468,9 @@ def main() -> None:
         preferred_arcade_cores=pref_cores,
         local_roms_only=local_roms_only,
         log_file=args.log_file,
-        log_uploader_cfg=cfg.get("logging", {})
+        log_uploader_cfg=cfg.get("logging", {}),
+        auto_update=auto_update,
+        config_path=args.config
     )
 
     if args.upload_logs:
